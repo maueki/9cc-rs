@@ -1,5 +1,5 @@
 [package]
-name = "learning-c-compiler"
+name = "9cc"
 version = "0.1.0"
 authors = ["Ueki Masaru <masaru.ueki@itage.co.jp>"]
 edition = "2018"
