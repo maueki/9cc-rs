@@ -194,69 +194,17 @@ fn main() {
         ::std::process::exit(1);
     }
 
-    let input = &args[1];
-    let tokens = tokenize(&input);
-
     println!(".intel_syntax noprefix");
     println!(".global main");
     println!("main:");
 
-    match tokens[0].0 {
-        Token::Num(n) => {
-            println!("mov rax, {}", n);
-        }
-        _ => {
-            eprintln!("最初の項が数ではありません");
-            std::process::exit(1);
-        }
-    }
+    let input = &args[1];
+    let mut tokens = tokenize(&input);
+    let node = add(&mut tokens);
 
-    let mut i = 1;
-    while i < tokens.len() {
-        let (tok, pos) = &tokens[i];
+    gen(&node);
 
-        match tok {
-            Token::Op(op) => {
-                if *op == OpType::Add {
-                    i += 1;
-                    let (next_tok, pos) = &tokens[i];
-                    if let Token::Num(n) = next_tok {
-                        println!("  add rax, {}", n);
-                        i += 1;
-                    } else {
-                        eprintln!("予期しないトークンです: {}", &input[*pos..]);
-                        std::process::exit(1);
-                    }
-
-                    continue;
-                }
-
-                if *op == OpType::Sub {
-                    i += 1;
-                    let (next_tok, pos) = &tokens[i];
-                    if let Token::Num(n) = next_tok {
-                        println!("  sub rax, {}", n);
-                        i += 1;
-                    } else {
-                        eprintln!("予期しないトークンです: {}", &input[*pos..]);
-                        std::process::exit(1);
-                    }
-                    continue;
-                }
-
-                eprintln!("予期しないトークンです: {}", &input[*pos..]);
-                std::process::exit(1);
-            }
-            Token::Eof => {
-                break;
-            }
-            _ => {
-                eprintln!("予期しないトークンです: {}", &input[*pos..]);
-                std::process::exit(1);
-            }
-        }
-    }
-
+    println!("  pop rax");
     println!("  ret");
 }
 
