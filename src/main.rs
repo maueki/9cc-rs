@@ -1,21 +1,39 @@
+use std::collections::VecDeque;
 use std::env;
 
+#[derive(PartialEq, Eq, Debug)]
 enum Token {
-    NUM(i64),
-    OP(OpType),
-    EOF,
+    Num(i64),
+    Op(OpType),
+    ParenL,
+    ParenR,
+    Eof,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 enum OpType {
     Add,
     Sub,
+    Mul,
+    Div,
 }
 
-fn tokenize(text: &str) -> Vec<(Token, usize)> {
+fn char2op(c: char) -> Option<OpType> {
+    match c {
+        '+' => Some(OpType::Add),
+        '-' => Some(OpType::Sub),
+        '*' => Some(OpType::Mul),
+        '/' => Some(OpType::Div),
+        _ => None,
+    }
+}
+
+type Tokens = VecDeque<(Token, usize)>;
+
+fn tokenize(text: &str) -> Tokens {
     let chars = text.clone().chars().collect::<Vec<_>>();
     let mut pos = 0;
-    let mut tokens = Vec::new();
+    let mut tokens = VecDeque::new();
 
     while pos < chars.len() {
         if chars[pos].is_whitespace() {
@@ -23,14 +41,20 @@ fn tokenize(text: &str) -> Vec<(Token, usize)> {
             continue;
         }
 
-        if chars[pos] == '+' {
-            tokens.push((Token::OP(OpType::Add), pos));
+        if let Some(op) = char2op(chars[pos]) {
+            tokens.push_back((Token::Op(op), pos));
             pos += 1;
             continue;
         }
 
-        if chars[pos] == '-' {
-            tokens.push((Token::OP(OpType::Sub), pos));
+        if chars[pos] == '(' {
+            tokens.push_back((Token::ParenL, pos));
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos] == ')' {
+            tokens.push_back((Token::ParenR, pos));
             pos += 1;
             continue;
         }
@@ -40,7 +64,7 @@ fn tokenize(text: &str) -> Vec<(Token, usize)> {
                 .iter()
                 .take_while(|c| c.is_digit(10))
                 .collect::<String>();
-            tokens.push((Token::NUM(cs.parse::<i64>().unwrap()), pos));
+            tokens.push_back((Token::Num(cs.parse::<i64>().unwrap()), pos));
             pos += cs.len();
             continue;
         }
@@ -51,8 +75,88 @@ fn tokenize(text: &str) -> Vec<(Token, usize)> {
         std::process::exit(1);
     }
 
-    tokens.push((Token::EOF, pos));
+    tokens.push_back((Token::Eof, pos));
     tokens
+}
+
+#[derive(PartialEq, Eq, Debug)]
+enum Node {
+    Num(i64),
+    Op(OpType, Box<Node>, Box<Node>),
+}
+
+fn new_node_num(v: i64) -> Node {
+    Node::Num(v)
+}
+
+fn new_node_op(ty: OpType, lhs: Node, rhs: Node) -> Node {
+    Node::Op(ty, Box::new(lhs), Box::new(rhs))
+}
+
+fn add(tokens: &mut Tokens) -> Node {
+    let mut node = mul(tokens);
+
+    loop {
+        match tokens[0] {
+            (Token::Op(OpType::Add), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Add, node, mul(tokens))
+            }
+            (Token::Op(OpType::Sub), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Sub, node, mul(tokens))
+            }
+            _ => break,
+        }
+    }
+
+    node
+}
+
+fn mul(tokens: &mut Tokens) -> Node {
+    let mut node = term(tokens);
+
+    loop {
+        match tokens[0] {
+            (Token::Op(OpType::Mul), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Mul, node, term(tokens));
+            }
+            (Token::Op(OpType::Div), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Div, node, term(tokens));
+            }
+            _ => break,
+        }
+    }
+    node
+}
+
+fn term(tokens: &mut Tokens) -> Node {
+    match tokens[0] {
+        (Token::ParenL, _) => {
+            tokens.pop_front();
+            let node = add(tokens);
+            match tokens[0] {
+                (Token::ParenR, _pos) => {
+                    tokens.pop_front();
+                }
+                _ => {
+                    eprintln!("開き括弧に対応する閉じ括弧がありません");
+                    std::process::exit(1);
+                }
+            }
+            return node;
+        }
+        (Token::Num(n), _) => {
+            tokens.pop_front();
+            return new_node_num(n);
+        }
+        _ => {}
+    }
+
+    eprintln!("数値でも閉じ括弧でもないトークンです");
+    std::process::exit(1);
 }
 
 fn main() {
@@ -71,7 +175,7 @@ fn main() {
     println!("main:");
 
     match tokens[0].0 {
-        Token::NUM(n) => {
+        Token::Num(n) => {
             println!("mov rax, {}", n);
         }
         _ => {
@@ -85,11 +189,11 @@ fn main() {
         let (tok, pos) = &tokens[i];
 
         match tok {
-            Token::OP(op) => {
+            Token::Op(op) => {
                 if *op == OpType::Add {
                     i += 1;
                     let (next_tok, pos) = &tokens[i];
-                    if let Token::NUM(n) = next_tok {
+                    if let Token::Num(n) = next_tok {
                         println!("  add rax, {}", n);
                         i += 1;
                     } else {
@@ -103,7 +207,7 @@ fn main() {
                 if *op == OpType::Sub {
                     i += 1;
                     let (next_tok, pos) = &tokens[i];
-                    if let Token::NUM(n) = next_tok {
+                    if let Token::Num(n) = next_tok {
                         println!("  sub rax, {}", n);
                         i += 1;
                     } else {
@@ -116,7 +220,7 @@ fn main() {
                 eprintln!("予期しないトークンです: {}", &input[*pos..]);
                 std::process::exit(1);
             }
-            Token::EOF => {
+            Token::Eof => {
                 break;
             }
             _ => {
@@ -127,4 +231,58 @@ fn main() {
     }
 
     println!("  ret");
+}
+
+#[cfg(test)]
+mod test {
+    use super::OpType::*;
+    use super::*;
+
+    #[test]
+    fn tokenize_test() {
+        use super::Token::*;
+
+        assert_eq!(
+            tokenize("1+1"),
+            vec![(Num(1), 0), (Op(Add), 1), (Num(1), 2), (Eof, 3)]
+        );
+
+        assert_eq!(
+            tokenize("(3+5)/2"),
+            vec![
+                (ParenL, 0),
+                (Num(3), 1),
+                (Op(Add), 2),
+                (Num(5), 3),
+                (ParenR, 4),
+                (Op(Div), 5),
+                (Num(2), 6),
+                (Eof, 7)
+            ]
+        );
+    }
+
+    #[test]
+    fn ast_test() {
+        use super::Node::*;
+        {
+            let mut tokens = super::tokenize("1+1");
+            assert_eq!(
+                add(&mut tokens),
+                Op(Add, Box::new(Num(1)), Box::new(Num(1)))
+            );
+        }
+
+        {
+            let mut tokens = super::tokenize("(3+5)/2");
+            assert_eq!(
+                add(&mut tokens),
+                Op(
+                    Div,
+                    Box::new(Op(Add, Box::new(Num(3)), Box::new(Num(5)))),
+                    Box::new(Num(2))
+                )
+            );
+        }
+    }
 }
