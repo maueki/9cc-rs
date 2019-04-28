@@ -159,6 +159,33 @@ fn term(tokens: &mut Tokens) -> Node {
     std::process::exit(1);
 }
 
+fn gen(node: &Node) {
+    use OpType::*;
+
+    if let Node::Num(v) = node {
+        println!("  push {}", v);
+        return;
+    } else if let Node::Op(op, lhs, rhs) = node {
+        gen(lhs);
+        gen(rhs);
+
+        println!("  pop rdi");
+        println!("  pop rax");
+
+        match op {
+            Add => println!("  add rax, rdi"),
+            Sub => println!("  sub rax, rdi"),
+            Mul => println!("  mul rdi"),
+            Div => {
+                println!("  mov rdx, 0");
+                println!("  div rdi");
+            }
+        }
+
+        println!("  push rax");
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
