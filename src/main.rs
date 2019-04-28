@@ -2,11 +2,17 @@ use std::env;
 
 enum Token {
     NUM(i64),
-    OP(String),
+    OP(OpType),
     EOF,
 }
 
-fn tokenize(text: &String) -> Vec<(Token, usize)> {
+#[derive(PartialEq, Eq)]
+enum OpType {
+    Add,
+    Sub,
+}
+
+fn tokenize(text: &str) -> Vec<(Token, usize)> {
     let chars = text.clone().chars().collect::<Vec<_>>();
     let mut pos = 0;
     let mut tokens = Vec::new();
@@ -17,8 +23,14 @@ fn tokenize(text: &String) -> Vec<(Token, usize)> {
             continue;
         }
 
-        if chars[pos] == '+' || chars[pos] == '-' {
-            tokens.push((Token::OP(chars[pos].to_string()), pos));
+        if chars[pos] == '+' {
+            tokens.push((Token::OP(OpType::Add), pos));
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos] == '-' {
+            tokens.push((Token::OP(OpType::Sub), pos));
             pos += 1;
             continue;
         }
@@ -42,7 +54,6 @@ fn tokenize(text: &String) -> Vec<(Token, usize)> {
     tokens.push((Token::EOF, pos));
     tokens
 }
-
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -75,7 +86,7 @@ fn main() {
 
         match tok {
             Token::OP(op) => {
-                if op == "+" {
+                if *op == OpType::Add {
                     i += 1;
                     let (next_tok, pos) = &tokens[i];
                     if let Token::NUM(n) = next_tok {
@@ -89,13 +100,12 @@ fn main() {
                     continue;
                 }
 
-                if op == "-" {
+                if *op == OpType::Sub {
                     i += 1;
                     let (next_tok, pos) = &tokens[i];
                     if let Token::NUM(n) = next_tok {
                         println!("  sub rax, {}", n);
                         i += 1;
-
                     } else {
                         eprintln!("予期しないトークンです: {}", &input[*pos..]);
                         std::process::exit(1);
