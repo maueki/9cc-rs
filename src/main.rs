@@ -1,6 +1,12 @@
 use std::collections::VecDeque;
 use std::env;
 
+use failure::{Error, Fail};
+
+#[derive(Fail, Debug)]
+#[fail(display = "Parse Error: {}, pos: {}", _0, _1)]
+struct ParseError(String, usize);
+
 #[derive(PartialEq, Eq, Debug)]
 enum Token {
     Num(i64),
@@ -93,70 +99,76 @@ fn new_node_op(ty: OpType, lhs: Node, rhs: Node) -> Node {
     Node::Op(ty, Box::new(lhs), Box::new(rhs))
 }
 
-fn add(tokens: &mut Tokens) -> Node {
-    let mut node = mul(tokens);
+fn add(tokens: &mut Tokens) -> Result<Node, Error> {
+    let mut node = mul(tokens)?;
 
     loop {
         match tokens[0] {
             (Token::Op(OpType::Add), _) => {
                 tokens.pop_front();
-                node = new_node_op(OpType::Add, node, mul(tokens))
+                node = new_node_op(OpType::Add, node, mul(tokens)?)
             }
             (Token::Op(OpType::Sub), _) => {
                 tokens.pop_front();
-                node = new_node_op(OpType::Sub, node, mul(tokens))
+                node = new_node_op(OpType::Sub, node, mul(tokens)?)
             }
             _ => break,
         }
     }
 
-    node
+    Ok(node)
 }
 
-fn mul(tokens: &mut Tokens) -> Node {
-    let mut node = term(tokens);
+fn mul(tokens: &mut Tokens) -> Result<Node, Error> {
+    let mut node = term(tokens)?;
 
     loop {
         match tokens[0] {
             (Token::Op(OpType::Mul), _) => {
                 tokens.pop_front();
-                node = new_node_op(OpType::Mul, node, term(tokens));
+                node = new_node_op(OpType::Mul, node, term(tokens)?);
             }
             (Token::Op(OpType::Div), _) => {
                 tokens.pop_front();
-                node = new_node_op(OpType::Div, node, term(tokens));
+                node = new_node_op(OpType::Div, node, term(tokens)?);
             }
             _ => break,
         }
     }
-    node
+    Ok(node)
 }
 
-fn term(tokens: &mut Tokens) -> Node {
+fn term(tokens: &mut Tokens) -> Result<Node, Error> {
     match tokens[0] {
         (Token::ParenL, _) => {
             tokens.pop_front();
-            let node = add(tokens);
+            let node = add(tokens)?;
             match tokens[0] {
                 (Token::ParenR, _pos) => {
                     tokens.pop_front();
                 }
-                _ => {
-                    eprintln!("開き括弧に対応する閉じ括弧がありません");
-                    std::process::exit(1);
+                (_, pos) => {
+                    return Err(ParseError(
+                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                        pos,
+                    )
+                    .into());
                 }
             }
-            return node;
+            return Ok(node);
         }
         (Token::Num(n), _) => {
             tokens.pop_front();
-            return new_node_num(n);
+            return Ok(new_node_num(n));
         }
         _ => {}
     }
 
-    eprintln!("数値でも閉じ括弧でもないトークンです");
-    std::process::exit(1);
+    Err(ParseError(
+        "数値でも閉じ括弧でもないトークンです".to_owned(),
+        tokens[0].1,
+    )
+    .into())
 }
 
 fn gen(node: &Node) {
@@ -200,7 +212,7 @@ fn main() {
 
     let input = &args[1];
     let mut tokens = tokenize(&input);
-    let node = add(&mut tokens);
+    let node = add(&mut tokens).unwrap();
 
     gen(&node);
 
@@ -243,7 +255,7 @@ mod test {
         {
             let mut tokens = super::tokenize("1+1");
             assert_eq!(
-                add(&mut tokens),
+                add(&mut tokens).unwrap(),
                 Op(Add, Box::new(Num(1)), Box::new(Num(1)))
             );
         }
@@ -251,7 +263,7 @@ mod test {
         {
             let mut tokens = super::tokenize("(3+5)/2");
             assert_eq!(
-                add(&mut tokens),
+                add(&mut tokens).unwrap(),
                 Op(
                     Div,
                     Box::new(Op(Add, Box::new(Num(3)), Box::new(Num(5)))),
