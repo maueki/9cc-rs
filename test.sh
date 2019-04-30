@@ -23,5 +23,6 @@ try 47 "5+6*7;"
 try 15 "5*(9-6);"
 try 4 "(3+5)/2;"
 try 3 "a=1;b=2;a+b;"
+try 3 "a=1;b=2;return a+b;"
 
 echo OK

@@ -146,6 +146,7 @@ enum Node {
     Op(OpType, Box<Node>, Box<Node>),
     Assign(Box<Node>, Box<Node>),
     Ident(char),
+    Return(Box<Node>),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -160,6 +161,10 @@ fn new_node_assign(lhs: Node, rhs: Node) -> Node {
     Node::Assign(Box::new(lhs), Box::new(rhs))
 }
 
+fn new_node_return(lhs: Node) -> Node {
+    Node::Return(Box::new(lhs))
+}
+
 fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
@@ -171,7 +176,13 @@ fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
 }
 
 fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
-    let node = assign(tokens)?;
+    let node = match tokens[0] {
+        (Token::Return, _) => {
+            tokens.pop_front();
+            new_node_return(assign(tokens)?)
+        }
+        _ => assign(tokens)?,
+    };
 
     if let (Token::Semicolon, _) = tokens[0] {
         tokens.pop_front();
@@ -294,6 +305,14 @@ fn gen(node: &Node) -> Result<(), Error> {
     use OpType::*;
 
     match node {
+        Node::Return(lhs) => {
+            gen(lhs)?;
+            println!("  pop rax");
+            println!("  mov rsp, rbp");
+            println!("  pop rbp");
+            println!("  ret");
+            Ok(())
+        }
         Node::Num(v) => {
             println!("  push {}", v);
             Ok(())
@@ -454,6 +473,24 @@ mod test {
                     Assign(Box::new(Ident('a')), Box::new(Num(1))),
                     Assign(Box::new(Ident('b')), Box::new(Num(2))),
                     Op(OpType::Add, Box::new(Ident('a')), Box::new(Ident('b')))
+                ]
+            );
+        }
+
+        {
+            let mut tokens = tokenize("a=1;b=2;return a+b;").unwrap();
+            let p = program(&mut tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![
+                    Assign(Box::new(Ident('a')), Box::new(Num(1))),
+                    Assign(Box::new(Ident('b')), Box::new(Num(2))),
+                    Return(Box::new(Op(
+                        OpType::Add,
+                        Box::new(Ident('a')),
+                        Box::new(Ident('b'))
+                    )))
                 ]
             );
         }
