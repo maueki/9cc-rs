@@ -20,6 +20,7 @@ enum Token {
     Ident(char),
     Assign,
     Semicolon,
+    Return,
     Eof,
 }
 
@@ -43,6 +44,10 @@ fn char2op(c: char) -> Option<OpType> {
 
 type Tokens = VecDeque<(Token, usize)>;
 
+fn is_alnum(c: char) -> bool {
+    ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || (c == '_')
+}
+
 fn tokenize(text: &str) -> Result<Tokens, Error> {
     let chars = text.clone().chars().collect::<Vec<_>>();
     let mut pos = 0;
@@ -52,6 +57,21 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
         if chars[pos].is_whitespace() {
             pos += 1;
             continue;
+        }
+
+        if chars[pos..]
+            .iter()
+            .collect::<String>()
+            .starts_with("return")
+        {
+            match chars.get(pos + 6) {
+                Some(c) if !is_alnum(*c) => {
+                    tokens.push_back((Token::Return, pos));
+                    pos += 6;
+                    continue;
+                }
+                _ => {}
+            }
         }
 
         if let Some(op) = char2op(chars[pos]) {
@@ -372,6 +392,20 @@ mod test {
                 (Op(Div), 5),
                 (Num(2), 6),
                 (Eof, 7)
+            ]
+        );
+
+        assert_eq!(
+            tokenize("a=1;return a;").unwrap(),
+            vec![
+                (Ident('a'), 0),
+                (Assign, 1),
+                (Num(1), 2),
+                (Semicolon, 3),
+                (Return, 4),
+                (Ident('a'), 11),
+                (Semicolon, 12),
+                (Eof, 13)
             ]
         );
     }
