@@ -1,5 +1,4 @@
 use lazy_static::lazy_static;
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::env;
 
@@ -55,16 +54,6 @@ lazy_static! {
     };
 }
 
-fn char2op(c: char) -> Option<OpType> {
-    match c {
-        '+' => Some(OpType::Add),
-        '-' => Some(OpType::Sub),
-        '*' => Some(OpType::Mul),
-        '/' => Some(OpType::Div),
-        _ => None,
-    }
-}
-
 type Tokens = VecDeque<(Token, usize)>;
 
 fn is_alnum(c: char) -> bool {
@@ -108,21 +97,12 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
                     .collect::<String>()
                     .as_str()
             {
-                match chars.get(pos + sym.len()) {
-                    Some(c) if is_alnum(*c) || c.is_whitespace() => {
-                        tokens.push_back((Token::Op(ty.clone()), pos));
-                        pos += sym.len();
-                        continue 'outer;
-                    }
-                    _ => {}
+                if let Some(..) = chars.get(pos + sym.len()) {
+                    tokens.push_back((Token::Op(ty.clone()), pos));
+                    pos += sym.len();
+                    continue 'outer;
                 }
             }
-        }
-
-        if let Some(op) = char2op(chars[pos]) {
-            tokens.push_back((Token::Op(op), pos));
-            pos += 1;
-            continue;
         }
 
         if chars[pos] == '(' {
@@ -133,12 +113,6 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
 
         if chars[pos] == ')' {
             tokens.push_back((Token::ParenR, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == '-' {
-            tokens.push_back((Token::Assign, pos));
             pos += 1;
             continue;
         }
@@ -240,18 +214,51 @@ fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
 }
 
 fn assign(tokens: &mut Tokens) -> Result<Node, Error> {
-    let mut node = add(tokens)?;
+    let mut node = equality(tokens)?;
+
+    while let (Token::Assign, _) = tokens[0] {
+        tokens.pop_front();
+        node = new_node_assign(node, assign(tokens)?);
+    }
+
+    Ok(node)
+}
+
+fn equality(tokens: &mut Tokens) -> Result<Node, Error> {
+    let mut node = relational(tokens)?;
 
     loop {
         match tokens[0] {
-            (Token::Assign, _) => {
+            (Token::Op(OpType::Eq), _) => {
                 tokens.pop_front();
-                node = new_node_assign(node, assign(tokens)?);
+                node = new_node_op(OpType::Eq, node, relational(tokens)?);
+            }
+            (Token::Op(OpType::Ne), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Ne, node, relational(tokens)?);
             }
             _ => break,
         }
     }
+    Ok(node)
+}
 
+fn relational(tokens: &mut Tokens) -> Result<Node, Error> {
+    let mut node = add(tokens)?;
+
+    loop {
+        match tokens[0] {
+            (Token::Op(OpType::Le), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Le, node, add(tokens)?);
+            }
+            (Token::Op(OpType::Ge), _) => {
+                tokens.pop_front();
+                node = new_node_op(OpType::Ge, node, add(tokens)?);
+            }
+            _ => break,
+        }
+    }
     Ok(node)
 }
 
@@ -448,7 +455,7 @@ impl Context {
         offset
     }
 
-    fn var_get(&mut self, ident: String) -> Option<usize> {
+    /*    fn var_get(&mut self, ident: String) -> Option<usize> {
         for var in self.var_map.iter() {
             if var.0 == ident {
                 return Some(var.1);
@@ -456,7 +463,7 @@ impl Context {
         }
 
         None
-    }
+    }*/
 }
 
 fn main() {
@@ -529,6 +536,20 @@ mod test {
                 (Ident("a".to_owned()), 11),
                 (Semicolon, 12),
                 (Eof, 13)
+            ]
+        );
+
+        assert_eq!(
+            tokenize("5*(9-6)").unwrap(),
+            vec![
+                (Num(5), 0),
+                (Op(Mul), 1),
+                (ParenL, 2),
+                (Num(9), 3),
+                (Op(Sub), 4),
+                (Num(6), 5),
+                (ParenR, 6),
+                (Eof, 7),
             ]
         );
     }
