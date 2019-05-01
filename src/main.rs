@@ -17,7 +17,7 @@ enum Token {
     Op(OpType),
     ParenL,
     ParenR,
-    Ident(char),
+    Ident(String),
     Assign,
     Semicolon,
     Return,
@@ -92,12 +92,6 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
             continue;
         }
 
-        if 'a' <= chars[pos] && chars[pos] <= 'z' {
-            tokens.push_back((Token::Ident(chars[pos]), pos));
-            pos += 1;
-            continue;
-        }
-
         if chars[pos] == '-' {
             tokens.push_back((Token::Assign, pos));
             pos += 1;
@@ -126,6 +120,14 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
             continue;
         }
 
+        if 'a' <= chars[pos] && chars[pos] <= 'z' {
+            let ident: String = chars[pos..].iter().take_while(|&c| is_alnum(*c)).collect();
+            let offset = ident.len();
+            tokens.push_back((Token::Ident(ident), pos));
+            pos += offset;
+            continue;
+        }
+
         return Err(TokenizeError(
             format!(
                 "トークナイズできません: {}",
@@ -145,7 +147,7 @@ enum Node {
     Num(i64),
     Op(OpType, Box<Node>, Box<Node>),
     Assign(Box<Node>, Box<Node>),
-    Ident(char),
+    Ident(String),
     Return(Box<Node>),
 }
 
@@ -248,9 +250,8 @@ fn mul(tokens: &mut Tokens) -> Result<Node, Error> {
 }
 
 fn term(tokens: &mut Tokens) -> Result<Node, Error> {
-    match tokens[0] {
+    match tokens.pop_front().unwrap() {
         (Token::ParenL, _) => {
-            tokens.pop_front();
             let node = add(tokens)?;
             match tokens[0] {
                 (Token::ParenR, _pos) => {
@@ -267,14 +268,14 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
             return Ok(node);
         }
         (Token::Num(n), _) => {
-            tokens.pop_front();
             return Ok(new_node_num(n));
         }
-        (Token::Ident(c), _) => {
-            tokens.pop_front();
-            return Ok(Node::Ident(c));
+        (Token::Ident(ref id), _) => {
+            return Ok(Node::Ident(id.clone()));
         }
-        _ => {}
+        front => {
+            tokens.push_front(front);
+        }
     }
 
     Err(ParseError(
@@ -284,10 +285,10 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
     .into())
 }
 
-fn gen_lval(node: &Node) -> Result<(), Error> {
+fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
-        Node::Ident(c) => {
-            let offset = (('z' as u32) - (*c as u32) + 1) * 8;
+        Node::Ident(id) => {
+            let offset = context.var_put(id.clone());
             println!("  mov rax, rbp");
             println!("  sub rax, {}", offset);
             println!("  push rax");
@@ -301,12 +302,12 @@ fn gen_lval(node: &Node) -> Result<(), Error> {
     }
 }
 
-fn gen(node: &Node) -> Result<(), Error> {
+fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
     use OpType::*;
 
     match node {
         Node::Return(lhs) => {
-            gen(lhs)?;
+            gen(lhs, context)?;
             println!("  pop rax");
             println!("  mov rsp, rbp");
             println!("  pop rbp");
@@ -318,15 +319,15 @@ fn gen(node: &Node) -> Result<(), Error> {
             Ok(())
         }
         Node::Ident(..) => {
-            gen_lval(node)?;
+            gen_lval(node, context)?;
             println!("  pop rax");
             println!("  mov rax, [rax]");
             println!("  push rax");
             Ok(())
         }
         Node::Assign(lhs, rhs) => {
-            gen_lval(&lhs)?;
-            gen(rhs)?;
+            gen_lval(&lhs, context)?;
+            gen(rhs, context)?;
             println!("  pop rdi");
             println!("  pop rax");
             println!("  mov [rax], rdi");
@@ -334,8 +335,8 @@ fn gen(node: &Node) -> Result<(), Error> {
             Ok(())
         }
         Node::Op(op, lhs, rhs) => {
-            gen(lhs)?;
-            gen(rhs)?;
+            gen(lhs, context)?;
+            gen(rhs, context)?;
 
             println!("  pop rdi");
             println!("  pop rax");
@@ -353,6 +354,43 @@ fn gen(node: &Node) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
+    }
+}
+
+struct Context {
+    var_map: VecDeque<(String, usize)>,
+    cur_offset: usize,
+}
+
+impl Context {
+    fn new() -> Self {
+        Context {
+            var_map: VecDeque::new(),
+            cur_offset: 0,
+        }
+    }
+
+    fn var_put(&mut self, ident: String) -> usize {
+        for var in self.var_map.iter() {
+            if var.0 == ident {
+                return var.1;
+            }
+        }
+
+        let offset = self.cur_offset;
+        self.cur_offset += 8;
+        self.var_map.push_front((ident, offset));
+        offset
+    }
+
+    fn var_get(&mut self, ident: String) -> Option<usize> {
+        for var in self.var_map.iter() {
+            if var.0 == ident {
+                return Some(var.1);
+            }
+        }
+
+        None
     }
 }
 
@@ -376,8 +414,9 @@ fn main() {
     println!("  mov rbp, rsp");
     println!("  sub rsp, 208");
 
+    let mut context = Context::new();
     for n in nodes {
-        gen(&n).unwrap();
+        gen(&n, &mut context).unwrap();
         println!("  pop rax");
     }
 
@@ -417,12 +456,12 @@ mod test {
         assert_eq!(
             tokenize("a=1;return a;").unwrap(),
             vec![
-                (Ident('a'), 0),
+                (Ident("a".to_owned()), 0),
                 (Assign, 1),
                 (Num(1), 2),
                 (Semicolon, 3),
                 (Return, 4),
-                (Ident('a'), 11),
+                (Ident("a".to_owned()), 11),
                 (Semicolon, 12),
                 (Eof, 13)
             ]
@@ -470,9 +509,13 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    Assign(Box::new(Ident('a')), Box::new(Num(1))),
-                    Assign(Box::new(Ident('b')), Box::new(Num(2))),
-                    Op(OpType::Add, Box::new(Ident('a')), Box::new(Ident('b')))
+                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
+                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
+                    Op(
+                        OpType::Add,
+                        Box::new(Ident("a".to_owned())),
+                        Box::new(Ident("b".to_owned()))
+                    )
                 ]
             );
         }
@@ -484,12 +527,33 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    Assign(Box::new(Ident('a')), Box::new(Num(1))),
-                    Assign(Box::new(Ident('b')), Box::new(Num(2))),
+                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
+                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
                     Return(Box::new(Op(
                         OpType::Add,
-                        Box::new(Ident('a')),
-                        Box::new(Ident('b'))
+                        Box::new(Ident("a".to_owned())),
+                        Box::new(Ident("b".to_owned()))
+                    )))
+                ]
+            );
+        }
+
+        {
+            let mut tokens = tokenize("foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
+            let p = program(&mut tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![
+                    Assign(Box::new(Ident("foo".to_owned())), Box::new(Num(1))),
+                    Assign(
+                        Box::new(Ident("bar".to_owned())),
+                        Box::new(Op(Add, Box::new(Num(2)), Box::new(Num(3))))
+                    ),
+                    Return(Box::new(Op(
+                        OpType::Add,
+                        Box::new(Ident("foo".to_owned())),
+                        Box::new(Ident("bar".to_owned()))
                     )))
                 ]
             );
