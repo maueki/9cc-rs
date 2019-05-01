@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::env;
 
@@ -24,12 +26,33 @@ enum Token {
     Eof,
 }
 
-#[derive(PartialEq, Eq, Debug)]
-enum OpType {
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum OpType {
     Add,
     Sub,
     Mul,
     Div,
+    Eq,
+    Ne,
+    Le,
+    Ge,
+}
+
+lazy_static! {
+    pub static ref STR_TO_OP: Vec<(&'static str, OpType)> = {
+        use OpType::*;
+        let mut v = Vec::new();
+        v.push(("==", Eq));
+        v.push(("!=", Ne));
+        v.push(("<=", Le));
+        v.push((">=", Ge));
+
+        v.push(("+", Add));
+        v.push(("-", Sub));
+        v.push(("*", Mul));
+        v.push(("/", Div));
+        v
+    };
 }
 
 fn char2op(c: char) -> Option<OpType> {
@@ -49,11 +72,11 @@ fn is_alnum(c: char) -> bool {
 }
 
 fn tokenize(text: &str) -> Result<Tokens, Error> {
-    let chars = text.clone().chars().collect::<Vec<_>>();
+    let chars = text.chars().collect::<Vec<_>>();
     let mut pos = 0;
     let mut tokens = VecDeque::new();
 
-    while pos < chars.len() {
+    'outer: while pos < chars.len() {
         if chars[pos].is_whitespace() {
             pos += 1;
             continue;
@@ -71,6 +94,28 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
                     continue;
                 }
                 _ => {}
+            }
+        }
+
+        for (sym, ty) in STR_TO_OP.iter() {
+            if chars.len() < pos + sym.len() {
+                continue;
+            }
+
+            if *sym
+                == chars[pos..pos + sym.len()]
+                    .iter()
+                    .collect::<String>()
+                    .as_str()
+            {
+                match chars.get(pos + sym.len()) {
+                    Some(c) if is_alnum(*c) || c.is_whitespace() => {
+                        tokens.push_back((Token::Op(ty.clone()), pos));
+                        pos += sym.len();
+                        continue 'outer;
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -348,6 +393,26 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
                 Div => {
                     println!("  mov rdx, 0");
                     println!("  div rdi");
+                }
+                Eq => {
+                    println!("  cmp rax, rdi");
+                    println!("  sete al");
+                    println!("  movzb rax, al");
+                }
+                Ne => {
+                    println!("  cmp rax, rdi");
+                    println!("  setne al");
+                    println!("  movzb rax, al");
+                }
+                Le => {
+                    println!("  cmp rax, rdi");
+                    println!("  setle al");
+                    println!("  movzb rax, al");
+                }
+                Ge => {
+                    println!("  cmp rdi, rax");
+                    println!("  setle al");
+                    println!("  movzb rax, al");
                 }
             }
 
