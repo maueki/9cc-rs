@@ -1,3 +1,4 @@
+#![feature(bind_by_move_pattern_guards)]
 use lazy_static::lazy_static;
 use std::collections::VecDeque;
 use std::env;
@@ -12,8 +13,8 @@ struct ParseError(String, usize);
 #[fail(display = "Tokenize Error: {}, pos: {}", _0, _1)]
 struct TokenizeError(String, usize);
 
-#[derive(PartialEq, Eq, Debug)]
-enum Token {
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum Token {
     Num(i64),
     Op(OpType),
     ParenL,
@@ -22,6 +23,9 @@ enum Token {
     Assign,
     Semicolon,
     Return,
+    Reserved(&'static str),
+    If,
+    Else,
     Eof,
 }
 
@@ -52,6 +56,14 @@ lazy_static! {
         v.push(("/", Div));
         v
     };
+    pub static ref RESERVED: Vec<(&'static str, Token)> = {
+        use Token::*;
+        let mut v = Vec::new();
+        v.push(("if", If));
+        v.push(("else", Else));
+        v.push(("return", Return));
+        v
+    };
 }
 
 type Tokens = VecDeque<(Token, usize)>;
@@ -66,23 +78,23 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
     let mut tokens = VecDeque::new();
 
     'outer: while pos < chars.len() {
+        eprintln!("tokenize: {:?}", chars[pos..].iter().collect::<String>());
+
         if chars[pos].is_whitespace() {
             pos += 1;
             continue;
         }
 
-        if chars[pos..]
-            .iter()
-            .collect::<String>()
-            .starts_with("return")
-        {
-            match chars.get(pos + 6) {
-                Some(c) if !is_alnum(*c) => {
-                    tokens.push_back((Token::Return, pos));
-                    pos += 6;
-                    continue;
+        for (word, token) in RESERVED.iter() {
+            if chars[pos..].iter().collect::<String>().starts_with(word) {
+                match chars.get(pos + word.len()) {
+                    Some(c) if !is_alnum(*c) => {
+                        tokens.push_back((token.clone(), pos));
+                        pos += word.len();
+                        continue 'outer;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
 
@@ -167,6 +179,10 @@ fn tokenize(text: &str) -> Result<Tokens, Error> {
 /// program: ε
 ///
 /// stmt: assign ";"
+/// stmt: "return" assign ";"
+/// stmt: ifclause
+///
+/// ifclause: "if" "(" assign ")" stmt ["else" stmt]
 ///
 /// assign: equality
 /// assign: equality "=" assign
@@ -204,6 +220,7 @@ enum Node {
     Assign(Box<Node>, Box<Node>),
     Ident(String),
     Return(Box<Node>),
+    If(Box<Node>, Box<Node>, Option<Box<Node>>),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -222,6 +239,22 @@ fn new_node_return(lhs: Node) -> Node {
     Node::Return(Box::new(lhs))
 }
 
+fn new_node_if(cond: Node, t: Node, e: Option<Node>) -> Node {
+    Node::If(Box::new(cond), Box::new(t), e.map(Box::new))
+}
+
+fn expect(tokens: &mut Tokens, token: Token) -> Result<(), Error> {
+    match tokens.pop_front() {
+        Some((tk, _)) if tk == token => Ok(()),
+        Some((_, pos)) => Err(ParseError("Invalid Tokesn".to_owned(), pos).into()),
+        None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
+    }
+}
+
+fn consume(tokens: &mut Tokens, token: Token) -> Result<(), Error> {
+    expect(tokens, token)
+}
+
 fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
@@ -233,20 +266,30 @@ fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
 }
 
 fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
-    let node = match tokens[0] {
-        (Token::Return, _) => {
+    let node = match tokens.get(0) {
+        Some((Token::Return, _)) => {
             tokens.pop_front();
             new_node_return(assign(tokens)?)
+        }
+        Some((Token::If, _)) => {
+            expect(tokens, Token::ParenL)?;
+            let node_cond = assign(tokens)?;
+            expect(tokens, Token::ParenR)?;
+
+            let node_then = stmt(tokens)?;
+
+            let node_else = consume(tokens, Token::Else).and_then(|_| stmt(tokens)).ok();
+
+            new_node_if(node_cond, node_then, node_else)
         }
         _ => assign(tokens)?,
     };
 
-    if let (Token::Semicolon, _) = tokens[0] {
-        tokens.pop_front();
-        return Ok(node);
+    if let Some((Token::Semicolon, _)) = tokens.pop_front() {
+        Ok(node)
+    } else {
+        Err(ParseError("';'ではないトークンです".to_owned(), tokens[0].1).into())
     }
-
-    Err(ParseError("';'ではないトークンです".to_owned(), tokens[0].1).into())
 }
 
 fn assign(tokens: &mut Tokens) -> Result<Node, Error> {
@@ -462,6 +505,10 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
+        Node::If(..) => {
+            //TODO:
+            Ok(())
+        }
     }
 }
 
@@ -586,6 +633,46 @@ mod test {
                 (Num(6), 5),
                 (ParenR, 6),
                 (Eof, 7),
+            ]
+        );
+
+        assert_eq!(
+            tokenize("a=1;if a==1 return 2;").unwrap(),
+            vec![
+                (Ident("a".to_owned()), 0),
+                (Assign, 1),
+                (Num(1), 2),
+                (Semicolon, 3),
+                (If, 4),
+                (Ident("a".to_owned()), 7),
+                (Op(Eq), 8),
+                (Num(1), 10),
+                (Return, 12),
+                (Num(2), 19),
+                (Semicolon, 20),
+                (Eof, 21),
+            ]
+        );
+
+        assert_eq!(
+            tokenize("a=1;if a==1 return 2; else return 3;").unwrap(),
+            vec![
+                (Ident("a".to_owned()), 0),
+                (Assign, 1),
+                (Num(1), 2),
+                (Semicolon, 3),
+                (If, 4),
+                (Ident("a".to_owned()), 7),
+                (Op(Eq), 8),
+                (Num(1), 10),
+                (Return, 12),
+                (Num(2), 19),
+                (Semicolon, 20),
+                (Else, 22),
+                (Return, 27),
+                (Num(3), 34),
+                (Semicolon, 35),
+                (Eof, 36),
             ]
         );
     }
