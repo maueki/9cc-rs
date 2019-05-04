@@ -11,9 +11,13 @@ pub struct ParseError(String, usize);
 /// program: stmt program
 /// program: ε
 ///
+/// stmt: "{" block_items "}"
 /// stmt: assign ";"
 /// stmt: "return" assign ";"
 /// stmt: ifclause
+///
+/// block_items: stmt
+/// block_items: stmt block_items
 ///
 /// ifclause: "if" "(" assign ")" stmt ["else" stmt]
 ///
@@ -54,6 +58,7 @@ pub enum Node {
     Ident(String),
     Return(Box<Node>),
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
+    Block(Vec<Box<Node>>),
 }
 
 fn new_node_num(v: i64) -> Node {

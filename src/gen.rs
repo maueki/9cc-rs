@@ -114,6 +114,10 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             }
             Ok(())
         }
+        Node::Block(..) => {
+            // TODO
+            Ok(())
+        }
     }
 }
 
