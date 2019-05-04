@@ -3,6 +3,12 @@ use std::collections::VecDeque;
 
 use super::parse::*;
 use super::*;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref REG_FOR_ARGS: Vec<&'static str> =
+        { vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"] };
+}
 
 #[derive(Fail, Debug)]
 #[fail(display = "Gen Error: {}", _0)]
@@ -123,7 +129,19 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
-        Node::Call(fname, _) => {
+        Node::Call(fname, args) => {
+            if args.len() > REG_FOR_ARGS.len() {
+                return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
+            }
+
+            for node in args.iter().rev() {
+                gen(node, context)?;
+            }
+
+            for reg in REG_FOR_ARGS.iter().take(args.len()) {
+                println!("  pop {}", reg);
+            }
+
             // rsp must be aligned 16-bytes
             println!("  xor r15,r15");
             println!("  test rsp,0xf");
@@ -132,6 +150,7 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  sub rsp, r15");
             println!("  call {}", fname);
             println!("  add rsp,r15");
+            println!("  push rax");
             Ok(())
         }
     }

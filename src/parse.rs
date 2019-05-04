@@ -46,10 +46,13 @@ pub struct ParseError(String, usize);
 /// unary: "+" term
 /// unary: "-" term
 ///
-/// term: ident "(" ")"
+/// term: ident "(" [arguments] ")"
 /// term: num
 /// term: ident
 /// term: "(" assign ")"
+///
+/// arguments: assign
+/// arguments: assign, arguments
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum Node {
@@ -257,12 +260,11 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
             return Ok(new_node_num(n));
         }
         (Token::Ident(ref id), _) => {
-            if let (Some((Token::ParenL, _)), Some((Token::ParenR, _))) =
-                (tokens.get(0), tokens.get(1))
-            {
+            if let Some((Token::ParenL, _)) = tokens.get(0) {
                 tokens.pop_front();
-                tokens.pop_front();
-                return Ok(Node::Call(id.clone(), Vec::new()));
+                let args = arguments(tokens)?;
+                expect(tokens, Token::ParenR)?;
+                return Ok(Node::Call(id.clone(), args));
             }
             return Ok(Node::Ident(id.clone()));
         }
@@ -276,6 +278,22 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
         tokens[0].1,
     )
     .into())
+}
+
+fn arguments(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
+    let mut nodes = Vec::new();
+
+    match assign(tokens) {
+        Ok(n) => nodes.push(n),
+        _ => return Ok(nodes),
+    }
+
+    while let Some((Token::Comma, _)) = tokens.get(0) {
+        tokens.pop_front();
+        nodes.push(assign(tokens)?);
+    }
+
+    Ok(nodes)
 }
 
 #[cfg(test)]
@@ -397,6 +415,19 @@ mod test {
                         Some(Box::new(Return(Box::new(Num(0)))))
                     ),
                 ]
+            );
+        }
+
+        {
+            let mut tokens = tokenize("foo(1,2,a);").unwrap();
+            let p = program(&mut tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![Call(
+                    "foo".to_owned(),
+                    vec![Num(1), Num(2), Ident("a".to_owned())]
+                )]
             );
         }
     }

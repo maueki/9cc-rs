@@ -21,6 +21,7 @@ pub enum Token {
     If,
     Else,
     Eof,
+    Comma,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -141,6 +142,12 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
 
         if chars[pos] == '=' {
             tokens.push_back((Token::Assign, pos));
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos] == ',' {
+            tokens.push_back((Token::Comma, pos));
             pos += 1;
             continue;
         }
@@ -303,6 +310,20 @@ mod test {
                 (ParenR, 4),
                 (Semicolon, 5),
                 (Eof, 6)
+            ]
+        );
+
+        assert_eq!(
+            tokenize("foo(1,2);").unwrap(),
+            vec![
+                (Ident("foo".to_owned()), 0),
+                (ParenL, 3),
+                (Num(1), 4),
+                (Comma, 5),
+                (Num(2), 6),
+                (ParenR, 7),
+                (Semicolon, 8),
+                (Eof, 9)
             ]
         );
     }
