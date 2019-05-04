@@ -12,6 +12,8 @@ pub enum Token {
     Op(OpType),
     ParenL,
     ParenR,
+    BraceL,
+    BraceR,
     Ident(String),
     Assign,
     Semicolon,
@@ -115,6 +117,18 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
 
         if chars[pos] == ')' {
             tokens.push_back((Token::ParenR, pos));
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos] == '{' {
+            tokens.push_back((Token::BraceL, pos));
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos] == '}' {
+            tokens.push_back((Token::BraceR, pos));
             pos += 1;
             continue;
         }
@@ -256,6 +270,28 @@ mod test {
                 (Num(3), 34),
                 (Semicolon, 35),
                 (Eof, 36),
+            ]
+        );
+
+        assert_eq!(
+            tokenize("a=1;if(a==1){return 2;}").unwrap(),
+            vec![
+                (Ident("a".to_owned()), 0),
+                (Assign, 1),
+                (Num(1), 2),
+                (Semicolon, 3),
+                (If, 4),
+                (ParenL, 6),
+                (Ident("a".to_owned()), 7),
+                (Op(Eq), 8),
+                (Num(1), 10),
+                (ParenR, 11),
+                (BraceL, 12),
+                (Return, 13),
+                (Num(2), 20),
+                (Semicolon, 21),
+                (BraceR, 22),
+                (Eof, 23),
             ]
         );
     }
