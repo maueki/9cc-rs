@@ -1,8 +1,12 @@
 use failure::Error;
 use std::collections::VecDeque;
 
-use super::Node;
+use super::parse::*;
 use super::*;
+
+#[derive(Fail, Debug)]
+#[fail(display = "Gen Error: {}", _0)]
+pub struct GenError(String);
 
 fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
@@ -13,11 +17,7 @@ fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
-        _ => Err(ParseError(
-            "代入の左辺値が変数ではありません".to_owned(),
-            0,
-        )
-        .into()),
+        _ => Err(GenError("代入の左辺値が変数ではありません".to_owned()).into()),
     }
 }
 
