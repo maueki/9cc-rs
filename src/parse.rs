@@ -46,6 +46,7 @@ pub struct ParseError(String, usize);
 /// unary: "+" term
 /// unary: "-" term
 ///
+/// term: ident "(" ")"
 /// term: num
 /// term: ident
 /// term: "(" assign ")"
@@ -59,6 +60,7 @@ pub enum Node {
     Return(Box<Node>),
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
     Block(Vec<Node>),
+    Call(String, Vec<Node>),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -255,6 +257,13 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
             return Ok(new_node_num(n));
         }
         (Token::Ident(ref id), _) => {
+            if let (Some((Token::ParenL, _)), Some((Token::ParenR, _))) =
+                (tokens.get(0), tokens.get(1))
+            {
+                tokens.pop_front();
+                tokens.pop_front();
+                return Ok(Node::Call(id.clone(), Vec::new()));
+            }
             return Ok(Node::Ident(id.clone()));
         }
         front => {

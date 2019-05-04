@@ -4,7 +4,7 @@ try() {
   input="$2"
 
   ./target/debug/9cc "$input" > /tmp/tmp.s
-  gcc -o /tmp/tmp /tmp/tmp.s
+  gcc -o /tmp/tmp /tmp/tmp.s foo.c
   /tmp/tmp
   actual="$?"
 
@@ -29,4 +29,5 @@ try 6 "foo = 1;bar = 2 + 3;return foo + bar;"
 try 3  "a=1;b=2;if (a!=b) return a+b; else return 0;"
 try 0  "a=1;b=1;if (a!=b) return a+b; else return 0;"
 try 3  "a=1;b=1;if (a==b) { c = 1; return a+b+c;} else return 0;"
+try 0  "foo(); return 0;"
 echo OK

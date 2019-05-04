@@ -294,6 +294,17 @@ mod test {
                 (Eof, 23),
             ]
         );
+
+        assert_eq!(
+            tokenize("foo();").unwrap(),
+            vec![
+                (Ident("foo".to_owned()), 0),
+                (ParenL, 3),
+                (ParenR, 4),
+                (Semicolon, 5),
+                (Eof, 6)
+            ]
+        );
     }
 
 }

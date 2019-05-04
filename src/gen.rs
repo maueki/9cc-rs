@@ -123,6 +123,17 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
+        Node::Call(fname, _) => {
+            // rsp must be aligned 16-bytes
+            println!("  xor r15,r15");
+            println!("  test rsp,0xf");
+            println!("  setnz r15b");
+            println!("  shl r15,3");
+            println!("  sub rsp, r15");
+            println!("  call {}", fname);
+            println!("  add rsp,r15");
+            Ok(())
+        }
     }
 }
 
