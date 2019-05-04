@@ -112,15 +112,18 @@ fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
             new_node_return(assign(tokens)?)
         }
         Some((Token::If, _)) => {
+            tokens.pop_front();
             expect(tokens, Token::ParenL)?;
             let node_cond = assign(tokens)?;
             expect(tokens, Token::ParenR)?;
 
             let node_then = stmt(tokens)?;
+            let node_else = match consume(tokens, Token::Else) {
+                Ok(()) => Some(stmt(tokens)?),
+                _ => None,
+            };
 
-            let node_else = consume(tokens, Token::Else).and_then(|_| stmt(tokens)).ok();
-
-            new_node_if(node_cond, node_then, node_else)
+            return Ok(new_node_if(node_cond, node_then, node_else));
         }
         _ => assign(tokens)?,
     };
@@ -128,14 +131,14 @@ fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
     if let Some((Token::Semicolon, _)) = tokens.pop_front() {
         Ok(node)
     } else {
-        Err(ParseError("';'ではないトークンです".to_owned(), tokens[0].1).into())
+        Err(ParseError("';'ではないトークンです".to_owned(), 0).into())
     }
 }
 
 fn assign(tokens: &mut Tokens) -> Result<Node, Error> {
     let mut node = equality(tokens)?;
 
-    while let (Token::Assign, _) = tokens[0] {
+    while let Some((Token::Assign, _)) = tokens.get(0) {
         tokens.pop_front();
         node = new_node_assign(node, assign(tokens)?);
     }
@@ -147,12 +150,12 @@ fn equality(tokens: &mut Tokens) -> Result<Node, Error> {
     let mut node = relational(tokens)?;
 
     loop {
-        match tokens[0] {
-            (Token::Op(OpType::Eq), _) => {
+        match tokens.get(0) {
+            Some((Token::Op(OpType::Eq), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Eq, node, relational(tokens)?);
             }
-            (Token::Op(OpType::Ne), _) => {
+            Some((Token::Op(OpType::Ne), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Ne, node, relational(tokens)?);
             }
@@ -166,12 +169,12 @@ fn relational(tokens: &mut Tokens) -> Result<Node, Error> {
     let mut node = add(tokens)?;
 
     loop {
-        match tokens[0] {
-            (Token::Op(OpType::Le), _) => {
+        match tokens.get(0) {
+            Some((Token::Op(OpType::Le), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Le, node, add(tokens)?);
             }
-            (Token::Op(OpType::Ge), _) => {
+            Some((Token::Op(OpType::Ge), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Ge, node, add(tokens)?);
             }
@@ -185,12 +188,12 @@ fn add(tokens: &mut Tokens) -> Result<Node, Error> {
     let mut node = mul(tokens)?;
 
     loop {
-        match tokens[0] {
-            (Token::Op(OpType::Add), _) => {
+        match tokens.get(0) {
+            Some((Token::Op(OpType::Add), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Add, node, mul(tokens)?);
             }
-            (Token::Op(OpType::Sub), _) => {
+            Some((Token::Op(OpType::Sub), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Sub, node, mul(tokens)?);
             }
@@ -205,12 +208,12 @@ fn mul(tokens: &mut Tokens) -> Result<Node, Error> {
     let mut node = term(tokens)?;
 
     loop {
-        match tokens[0] {
-            (Token::Op(OpType::Mul), _) => {
+        match tokens.get(0) {
+            Some((Token::Op(OpType::Mul), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Mul, node, term(tokens)?);
             }
-            (Token::Op(OpType::Div), _) => {
+            Some((Token::Op(OpType::Div), _)) => {
                 tokens.pop_front();
                 node = new_node_op(OpType::Div, node, term(tokens)?);
             }
@@ -224,16 +227,19 @@ fn term(tokens: &mut Tokens) -> Result<Node, Error> {
     match tokens.pop_front().unwrap() {
         (Token::ParenL, _) => {
             let node = add(tokens)?;
-            match tokens[0] {
-                (Token::ParenR, _pos) => {
+            match tokens.get(0) {
+                Some((Token::ParenR, _pos)) => {
                     tokens.pop_front();
                 }
-                (_, pos) => {
+                Some((_, pos)) => {
                     return Err(ParseError(
                         "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                        pos,
+                        *pos,
                     )
                     .into());
+                }
+                None => {
+                    return Err(ParseError("想定されないEOFです".to_owned(), 0).into());
                 }
             }
             return Ok(node);
@@ -379,6 +385,32 @@ mod test {
                         Box::new(Ident("foo".to_owned())),
                         Box::new(Ident("bar".to_owned()))
                     )))
+                ]
+            );
+        }
+
+        {
+            let mut tokens = tokenize("a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
+            let p = program(&mut tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![
+                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
+                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
+                    If(
+                        Box::new(Op(
+                            Eq,
+                            Box::new(Ident("a".to_owned())),
+                            Box::new(Ident("b".to_owned()))
+                        )),
+                        Box::new(Return(Box::new(Op(
+                            Add,
+                            Box::new(Ident("a".to_owned())),
+                            Box::new(Ident("b".to_owned()))
+                        )))),
+                        Some(Box::new(Return(Box::new(Num(0)))))
+                    ),
                 ]
             );
         }
