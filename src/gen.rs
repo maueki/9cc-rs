@@ -93,7 +93,27 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
-        Node::If(cond, node_then, node_else) => Ok(()),
+        Node::If(cond, node_then, node_else) => {
+            gen(cond, context)?;
+            println!("  pop rax");
+            println!("  cmp rax, 0");
+            let else_label = context.new_label();
+            println!("  je {}", else_label);
+            gen(node_then, context)?;
+            match node_else {
+                Some(node) => {
+                    let end_label = context.new_label();
+                    println!("  jmp {}", end_label);
+                    println!("{}:", else_label);
+                    gen(node, context)?;
+                    println!("{}:", end_label);
+                }
+                None => {
+                    println!("{}:", else_label);
+                }
+            }
+            Ok(())
+        }
     }
 }
 
