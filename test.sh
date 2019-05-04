@@ -28,5 +28,5 @@ try 3 "a=1;b=2;return a+b;"
 try 6 "foo = 1;bar = 2 + 3;return foo + bar;"
 try 3  "a=1;b=2;if (a!=b) return a+b; else return 0;"
 try 0  "a=1;b=1;if (a!=b) return a+b; else return 0;"
-
+try 3  "a=1;b=1;if (a==b) { c = 1; return a+b+c;} else return 0;"
 echo OK

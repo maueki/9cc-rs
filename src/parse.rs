@@ -58,7 +58,7 @@ pub enum Node {
     Ident(String),
     Return(Box<Node>),
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
-    Block(Vec<Box<Node>>),
+    Block(Vec<Node>),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -122,6 +122,15 @@ fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
             };
 
             return Ok(new_node_if(node_cond, node_then, node_else));
+        }
+        Some((Token::BraceL, _)) => {
+            tokens.pop_front();
+            let mut stmts = Vec::new();
+            while let Ok(node) = stmt(tokens) {
+                stmts.push(node);
+            }
+            expect(tokens, Token::BraceR)?;
+            return Ok(Node::Block(stmts));
         }
         _ => assign(tokens)?,
     };

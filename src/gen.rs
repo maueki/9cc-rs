@@ -114,8 +114,13 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             }
             Ok(())
         }
-        Node::Block(..) => {
-            // TODO
+        Node::Block(nodes) => {
+            for n in nodes {
+                gen(n, context)?;
+                println!("  pop rax");
+            }
+
+            println!("  push rax");
             Ok(())
         }
     }
