@@ -6,8 +6,7 @@ use super::*;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    pub static ref REG_FOR_ARGS: Vec<&'static str> =
-        { vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"] };
+    pub static ref REG_ARGS: Vec<&'static str> = { vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"] };
 }
 
 #[derive(Fail, Debug)]
@@ -17,7 +16,7 @@ pub struct GenError(String);
 fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
         Node::Ident(id) => {
-            let offset = context.var_put(id.clone());
+            let offset = context.var_put(id);
             println!("  mov rax, rbp");
             println!("  sub rax, {}", offset);
             println!("  push rax");
@@ -130,7 +129,7 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             Ok(())
         }
         Node::Call(fname, args) => {
-            if args.len() > REG_FOR_ARGS.len() {
+            if args.len() > REG_ARGS.len() {
                 return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
             }
 
@@ -138,7 +137,7 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
                 gen(node, context)?;
             }
 
-            for reg in REG_FOR_ARGS.iter().take(args.len()) {
+            for reg in REG_ARGS.iter().take(args.len()) {
                 println!("  pop {}", reg);
             }
 
@@ -153,39 +152,76 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
-        Node::DeclFunc(..) => {
-            // TODO:
+        Node::DeclFunc(fname, params, stmts) => {
+            if params.len() > REG_ARGS.len() {
+                return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
+            }
+
+            let mut context = Context::with_parent(context);
+            println!("{}:", fname);
+            println!("  push rbp");
+            println!("  mov rbp, rsp");
+            println!("  sub rsp, 208"); // FIXME:
+
+            for (i, p) in params.iter().enumerate() {
+                let offset = context.var_put(p);
+                println!("  mov rax, rbp");
+                println!("  sub rax, {}", offset);
+                println!("  mov [rax], {}", REG_ARGS[i]);
+            }
+
+            for node in stmts {
+                gen(&node, &mut context)?;
+                println!("  pop rax");
+            }
+
+            // TODO: Node::Returnで追加されているはずだが…
+            println!("  mov rsp, rbp");
+            println!("  pop rbp");
+            println!("  ret");
+
             Ok(())
         }
     }
 }
 
-pub struct Context {
+pub struct Context<'a> {
     var_map: VecDeque<(String, usize)>,
     cur_offset: usize,
     label_index: usize,
+    parent: Option<&'a Context<'a>>,
 }
 
-impl Context {
+impl<'a> Context<'a> {
     pub fn new() -> Self {
         Context {
             var_map: VecDeque::new(),
             cur_offset: 0,
             label_index: 0,
+            parent: None,
         }
     }
 
-    fn var_put(&mut self, ident: String) -> usize {
+    pub fn with_parent(parent: &'a Context<'a>) -> Self {
+        Context {
+            var_map: VecDeque::new(),
+            cur_offset: 0,
+            label_index: 0,
+            parent: Some(parent),
+        }
+    }
+
+    fn var_put(&mut self, ident: &String) -> usize {
         for var in self.var_map.iter() {
-            if var.0 == ident {
+            if var.0 == *ident {
                 return var.1;
             }
         }
 
-        let offset = self.cur_offset;
         self.cur_offset += 8;
-        self.var_map.push_front((ident, offset));
-        offset
+        self.var_map
+            .push_front((ident.to_string(), self.cur_offset));
+        self.cur_offset
     }
 
     /*    fn var_get(&mut self, ident: String) -> Option<usize> {

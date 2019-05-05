@@ -92,7 +92,7 @@ fn new_node_if(cond: Node, t: Node, e: Option<Node>) -> Node {
 fn expect(tokens: &mut Tokens, token: Token) -> Result<(), Error> {
     match tokens.pop_front() {
         Some((tk, _)) if tk == token => Ok(()),
-        Some((_, pos)) => Err(ParseError("Invalid Tokesn".to_owned(), pos).into()),
+        Some((_, pos)) => Err(ParseError("Invalid Token".to_owned(), pos).into()),
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
 }
@@ -122,20 +122,22 @@ fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
 
     let mut params = Vec::new();
 
-    fn expect_param(tokens: &mut Tokens) -> Result<String, Error> {
-        match tokens.pop_front() {
-            Some((Token::Ident(pname), _)) => Ok(pname),
-            Some((_, pos)) => {
-                Err(ParseError("不適切なパラメタ名です".to_owned(), pos).into())
-            }
-            _ => Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
-        }
-    }
-
     expect(tokens, Token::ParenL)?;
-    params.push(expect_param(tokens)?);
-    while let Some((Token::Comma, _)) = tokens.pop_front() {
-        params.push(expect_param(tokens)?);
+    loop {
+        match tokens.get(0) {
+            Some((Token::Ident(pname), _)) => {
+                params.push(pname.clone());
+                tokens.pop_front();
+            }
+            _ => break,
+        }
+
+        match tokens.get(0) {
+            Some((Token::Comma, _)) => {
+                tokens.pop_front();
+            }
+            _ => break,
+        }
     }
     expect(tokens, Token::ParenR)?;
 
@@ -144,6 +146,7 @@ fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
     while let Ok(node) = stmt(tokens) {
         nodes.push(node);
     }
+    expect(tokens, Token::BraceR)?;
 
     Ok(Node::DeclFunc(fname, params, nodes))
 }
@@ -477,6 +480,23 @@ mod test {
                 vec![Call(
                     "foo".to_owned(),
                     vec![Num(1), Num(2), Ident("a".to_owned())]
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn program_tset() {
+        use super::Node::*;
+        {
+            let mut tokens = tokenize("main() { return 0; }").unwrap();
+            let p = program(&mut tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![DeclFunc(
+                    "main".to_owned(),
+                    Vec::new(),
+                    vec![Return(Box::new(Num(0)))]
                 )]
             );
         }
