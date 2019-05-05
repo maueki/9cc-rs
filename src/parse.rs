@@ -8,8 +8,10 @@ pub struct ParseError(String, usize);
 
 /// parser syntax
 ///
-/// program: stmt program
+/// program: decl_func program
 /// program: ε
+///
+/// decl_func: ident "(" params ")" "{" stmt "}"
 ///
 /// stmt: "{" block_items "}"
 /// stmt: assign ";"
@@ -64,6 +66,7 @@ pub enum Node {
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
     Block(Vec<Node>),
     Call(String, Vec<Node>),
+    DeclFunc(String, Vec<String>, Vec<Node>),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -102,10 +105,47 @@ pub fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
     while tokens[0].0 != Token::Eof {
-        nodes.push(stmt(tokens)?);
+        nodes.push(decl_func(tokens)?);
     }
 
     Ok(nodes)
+}
+
+fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
+    let fname = match tokens.pop_front() {
+        Some((Token::Ident(fname), _)) => fname,
+        Some((_, pos)) => {
+            return Err(ParseError("不適切な関数名です".to_owned(), pos).into())
+        }
+        _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
+    };
+
+    let mut params = Vec::new();
+
+    fn expect_param(tokens: &mut Tokens) -> Result<String, Error> {
+        match tokens.pop_front() {
+            Some((Token::Ident(pname), _)) => Ok(pname),
+            Some((_, pos)) => {
+                Err(ParseError("不適切なパラメタ名です".to_owned(), pos).into())
+            }
+            _ => Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
+        }
+    }
+
+    expect(tokens, Token::ParenL)?;
+    params.push(expect_param(tokens)?);
+    while let Some((Token::Comma, _)) = tokens.pop_front() {
+        params.push(expect_param(tokens)?);
+    }
+    expect(tokens, Token::ParenR)?;
+
+    expect(tokens, Token::BraceL)?;
+    let mut nodes = Vec::new();
+    while let Ok(node) = stmt(tokens) {
+        nodes.push(node);
+    }
+
+    Ok(Node::DeclFunc(fname, params, nodes))
 }
 
 fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
@@ -325,19 +365,29 @@ mod test {
         }
     }
 
+    fn stmts(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
+        let mut nodes = Vec::new();
+
+        while let Ok(node) = stmt(tokens) {
+            nodes.push(node);
+        }
+
+        Ok(nodes)
+    }
+
     #[test]
-    fn program_test() {
+    fn stmt_test() {
         use super::Node::*;
         use super::*;
 
         {
             let mut tokens = tokenize("0;").unwrap();
-            assert_eq!(program(&mut tokens).unwrap(), vec![Node::Num(0)]);
+            assert_eq!(stmts(&mut tokens).unwrap(), vec![Node::Num(0)]);
         }
 
         {
             let mut tokens = tokenize("a=1;b=2;a+b;").unwrap();
-            let p = program(&mut tokens);
+            let p = stmts(&mut tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
@@ -355,7 +405,7 @@ mod test {
 
         {
             let mut tokens = tokenize("a=1;b=2;return a+b;").unwrap();
-            let p = program(&mut tokens);
+            let p = stmts(&mut tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
@@ -373,7 +423,7 @@ mod test {
 
         {
             let mut tokens = tokenize("foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
-            let p = program(&mut tokens);
+            let p = stmts(&mut tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
@@ -394,7 +444,7 @@ mod test {
 
         {
             let mut tokens = tokenize("a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
-            let p = program(&mut tokens);
+            let p = stmts(&mut tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
@@ -420,7 +470,7 @@ mod test {
 
         {
             let mut tokens = tokenize("foo(1,2,a);").unwrap();
-            let p = program(&mut tokens);
+            let p = stmts(&mut tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),

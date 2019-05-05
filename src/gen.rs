@@ -153,6 +153,10 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
+        Node::DeclFunc(..) => {
+            // TODO:
+            Ok(())
+        }
     }
 }
 
