@@ -10,18 +10,12 @@ struct TokenizeError(String, usize);
 pub enum Token {
     Num(i64),
     Op(OpType),
-    ParenL,
-    ParenR,
-    BraceL,
-    BraceR,
+    SLSym(char), // single-letter symbol
     Ident(String),
-    Assign,
-    Semicolon,
     Return,
     If,
     Else,
     Eof,
-    Comma,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -44,11 +38,6 @@ lazy_static! {
         v.push(("!=", Ne));
         v.push(("<=", Le));
         v.push((">=", Ge));
-
-        v.push(("+", Add));
-        v.push(("-", Sub));
-        v.push(("*", Mul));
-        v.push(("/", Div));
         v
     };
     pub static ref RESERVED: Vec<(&'static str, Token)> = {
@@ -110,44 +99,11 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
             }
         }
 
-        if chars[pos] == '(' {
-            tokens.push_back((Token::ParenL, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == ')' {
-            tokens.push_back((Token::ParenR, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == '{' {
-            tokens.push_back((Token::BraceL, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == '}' {
-            tokens.push_back((Token::BraceR, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == ';' {
-            tokens.push_back((Token::Semicolon, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == '=' {
-            tokens.push_back((Token::Assign, pos));
-            pos += 1;
-            continue;
-        }
-
-        if chars[pos] == ',' {
-            tokens.push_back((Token::Comma, pos));
+        if let Some(..) = "+-*/;=(),{}<>[]&.!?:|^%~#"
+            .chars()
+            .find(|&c| c == chars[pos])
+        {
+            tokens.push_back((Token::SLSym(chars[pos]), pos));
             pos += 1;
             continue;
         }
@@ -195,18 +151,18 @@ mod test {
 
         assert_eq!(
             tokenize("1+1").unwrap(),
-            vec![(Num(1), 0), (Op(Add), 1), (Num(1), 2), (Eof, 3)]
+            vec![(Num(1), 0), (SLSym('+'), 1), (Num(1), 2), (Eof, 3)]
         );
 
         assert_eq!(
             tokenize("(3+5)/2").unwrap(),
             vec![
-                (ParenL, 0),
+                (SLSym('('), 0),
                 (Num(3), 1),
-                (Op(Add), 2),
+                (SLSym('+'), 2),
                 (Num(5), 3),
-                (ParenR, 4),
-                (Op(Div), 5),
+                (SLSym(')'), 4),
+                (SLSym('/'), 5),
                 (Num(2), 6),
                 (Eof, 7)
             ]
@@ -216,12 +172,12 @@ mod test {
             tokenize("a=1;return a;").unwrap(),
             vec![
                 (Ident("a".to_owned()), 0),
-                (Assign, 1),
+                (SLSym('='), 1),
                 (Num(1), 2),
-                (Semicolon, 3),
+                (SLSym(';'), 3),
                 (Return, 4),
                 (Ident("a".to_owned()), 11),
-                (Semicolon, 12),
+                (SLSym(';'), 12),
                 (Eof, 13)
             ]
         );
@@ -230,12 +186,12 @@ mod test {
             tokenize("5*(9-6)").unwrap(),
             vec![
                 (Num(5), 0),
-                (Op(Mul), 1),
-                (ParenL, 2),
+                (SLSym('*'), 1),
+                (SLSym('('), 2),
                 (Num(9), 3),
-                (Op(Sub), 4),
+                (SLSym('-'), 4),
                 (Num(6), 5),
-                (ParenR, 6),
+                (SLSym(')'), 6),
                 (Eof, 7),
             ]
         );
@@ -244,16 +200,16 @@ mod test {
             tokenize("a=1;if a==1 return 2;").unwrap(),
             vec![
                 (Ident("a".to_owned()), 0),
-                (Assign, 1),
+                (SLSym('='), 1),
                 (Num(1), 2),
-                (Semicolon, 3),
+                (SLSym(';'), 3),
                 (If, 4),
                 (Ident("a".to_owned()), 7),
                 (Op(Eq), 8),
                 (Num(1), 10),
                 (Return, 12),
                 (Num(2), 19),
-                (Semicolon, 20),
+                (SLSym(';'), 20),
                 (Eof, 21),
             ]
         );
@@ -262,20 +218,20 @@ mod test {
             tokenize("a=1;if a==1 return 2; else return 3;").unwrap(),
             vec![
                 (Ident("a".to_owned()), 0),
-                (Assign, 1),
+                (SLSym('='), 1),
                 (Num(1), 2),
-                (Semicolon, 3),
+                (SLSym(';'), 3),
                 (If, 4),
                 (Ident("a".to_owned()), 7),
                 (Op(Eq), 8),
                 (Num(1), 10),
                 (Return, 12),
                 (Num(2), 19),
-                (Semicolon, 20),
+                (SLSym(';'), 20),
                 (Else, 22),
                 (Return, 27),
                 (Num(3), 34),
-                (Semicolon, 35),
+                (SLSym(';'), 35),
                 (Eof, 36),
             ]
         );
@@ -284,20 +240,20 @@ mod test {
             tokenize("a=1;if(a==1){return 2;}").unwrap(),
             vec![
                 (Ident("a".to_owned()), 0),
-                (Assign, 1),
+                (SLSym('='), 1),
                 (Num(1), 2),
-                (Semicolon, 3),
+                (SLSym(';'), 3),
                 (If, 4),
-                (ParenL, 6),
+                (SLSym('('), 6),
                 (Ident("a".to_owned()), 7),
                 (Op(Eq), 8),
                 (Num(1), 10),
-                (ParenR, 11),
-                (BraceL, 12),
+                (SLSym(')'), 11),
+                (SLSym('{'), 12),
                 (Return, 13),
                 (Num(2), 20),
-                (Semicolon, 21),
-                (BraceR, 22),
+                (SLSym(';'), 21),
+                (SLSym('}'), 22),
                 (Eof, 23),
             ]
         );
@@ -306,9 +262,9 @@ mod test {
             tokenize("foo();").unwrap(),
             vec![
                 (Ident("foo".to_owned()), 0),
-                (ParenL, 3),
-                (ParenR, 4),
-                (Semicolon, 5),
+                (SLSym('('), 3),
+                (SLSym(')'), 4),
+                (SLSym(';'), 5),
                 (Eof, 6)
             ]
         );
@@ -317,12 +273,12 @@ mod test {
             tokenize("foo(1,2);").unwrap(),
             vec![
                 (Ident("foo".to_owned()), 0),
-                (ParenL, 3),
+                (SLSym('('), 3),
                 (Num(1), 4),
-                (Comma, 5),
+                (SLSym(','), 5),
                 (Num(2), 6),
-                (ParenR, 7),
-                (Semicolon, 8),
+                (SLSym(')'), 7),
+                (SLSym(';'), 8),
                 (Eof, 9)
             ]
         );

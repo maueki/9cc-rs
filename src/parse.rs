@@ -117,9 +117,9 @@ fn new_node_if(cond: Node, t: Node, e: Option<Node>) -> Node {
     Node::If(Box::new(cond), Box::new(t), e.map(Box::new))
 }
 
-fn expect(tokens: &Tokens, token: Token, context: &mut Context) -> Result<(), Error> {
+fn consume(c: char, tokens: &Tokens, context: &mut Context) -> Result<(), Error> {
     match tokens.get(context.pos) {
-        Some((tk, _)) if *tk == token => {
+        Some((Token::SLSym(sym), _)) if *sym == c => {
             context.pos += 1;
             Ok(())
         }
@@ -128,8 +128,15 @@ fn expect(tokens: &Tokens, token: Token, context: &mut Context) -> Result<(), Er
     }
 }
 
-fn consume(tokens: &Tokens, token: Token, context: &mut Context) -> Result<(), Error> {
-    expect(tokens, token, context)
+fn expect(token: Token, tokens: &Tokens, context: &mut Context) -> Result<(), Error> {
+    match tokens.get(context.pos) {
+        Some((tk, _)) if *tk == token => {
+            context.pos += 1;
+            Ok(())
+        }
+        Some((_, pos)) => Err(ParseError("Invalid Token".to_owned(), *pos).into()),
+        None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
+    }
 }
 
 fn program(tokens: &Tokens, context: &mut Context) -> Result<Vec<Node>, Error> {
@@ -156,16 +163,16 @@ fn decl_func(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
         _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
     };
 
-    expect(tokens, Token::ParenL, context)?;
+    consume('(', tokens, context)?;
     let ps = params(tokens, context)?;
-    expect(tokens, Token::ParenR, context)?;
+    consume(')', tokens, context)?;
 
-    expect(tokens, Token::BraceL, context)?;
+    consume('{', tokens, context)?;
     let mut nodes = Vec::new();
     while let Ok(node) = stmt(tokens, context) {
         nodes.push(node);
     }
-    expect(tokens, Token::BraceR, context)?;
+    consume('}', tokens, context)?;
 
     Ok(Node::DeclFunc(fname.clone(), ps, nodes))
 }
@@ -186,7 +193,7 @@ fn params(tokens: &Tokens, context: &mut Context) -> Result<Vec<Param>, Error> {
         }
 
         match tokens.get(context.pos) {
-            Some((Token::Comma, _)) => {
+            Some((Token::SLSym(','), _)) => {
                 context.pos += 1;
             }
             _ => break,
@@ -201,30 +208,30 @@ fn stmt(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
         Some((Token::Return, _)) => {
             context.pos += 1;
             let node = new_node_return(assign(tokens, context)?);
-            expect(tokens, Token::Semicolon, context)?;
+            consume(';', tokens, context)?;
             Ok(node)
         }
         Some((Token::If, _)) => {
             context.pos += 1;
-            expect(tokens, Token::ParenL, context)?;
+            consume('(', tokens, context)?;
             let node_cond = assign(tokens, context)?;
-            expect(tokens, Token::ParenR, context)?;
+            consume(')', tokens, context)?;
 
             let node_then = stmt(tokens, context)?;
-            let node_else = match consume(tokens, Token::Else, context) {
+            let node_else = match expect(Token::Else, tokens, context) {
                 Ok(()) => Some(stmt(tokens, context)?),
                 _ => None,
             };
 
             Ok(new_node_if(node_cond, node_then, node_else))
         }
-        Some((Token::BraceL, _)) => {
+        Some((Token::SLSym('{'), _)) => {
             context.pos += 1;
             let mut stmts = Vec::new();
             while let Ok(node) = stmt(tokens, context) {
                 stmts.push(node);
             }
-            expect(tokens, Token::BraceR, context)?;
+            consume('}', tokens, context)?;
             Ok(Node::Block(stmts))
         }
         _ => {
@@ -234,7 +241,7 @@ fn stmt(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
             } else {
                 context.pos = pos;
                 let node = assign(tokens, context)?;
-                expect(tokens, Token::Semicolon, context)?;
+                consume(';', tokens, context)?;
                 Ok(node)
             }
         }
@@ -245,13 +252,12 @@ fn decl_var(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
     let t = ty(tokens, context)?;
 
     if let Some((Token::Ident(var), _)) = tokens.get(context.pos) {
-        if let Some((Token::Semicolon, _)) = tokens.get(context.pos + 1) {
-            let node = Node::DeclVar(var.to_string(), t);
-            context.pos += 2;
-            return Ok(node);
-        }
+        context.pos += 1;
+        consume(';', tokens, context)?;
+        Ok(Node::DeclVar(var.to_string(), t))
+    } else {
+        Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
     }
-    return Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into());
 }
 
 fn str2ty(s: &str) -> TyType {
@@ -270,7 +276,7 @@ fn ty(tokens: &Tokens, context: &mut Context) -> Result<TyType, Error> {
         _ => return Err(ParseError("ty: Unexpected Token".to_owned(), 0).into()),
     };
 
-    while let Some((Token::Op(OpType::Mul), _)) = tokens.get(context.pos) {
+    while let Some((Token::SLSym('*'), _)) = tokens.get(context.pos) {
         context.pos += 1;
         tytype = TyType::Ptr(Box::new(tytype));
     }
@@ -281,7 +287,7 @@ fn ty(tokens: &Tokens, context: &mut Context) -> Result<TyType, Error> {
 fn assign(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
     let mut node = equality(tokens, context)?;
 
-    while let Some((Token::Assign, _)) = tokens.get(context.pos) {
+    while let Some((Token::SLSym('='), _)) = tokens.get(context.pos) {
         context.pos += 1;
         node = new_node_assign(node, assign(tokens, context)?);
     }
@@ -332,11 +338,11 @@ fn add(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
 
     loop {
         match tokens.get(context.pos) {
-            Some((Token::Op(OpType::Add), _)) => {
+            Some((Token::SLSym('+'), _)) => {
                 context.pos += 1;
                 node = new_node_op(OpType::Add, node, mul(tokens, context)?);
             }
-            Some((Token::Op(OpType::Sub), _)) => {
+            Some((Token::SLSym('-'), _)) => {
                 context.pos += 1;
                 node = new_node_op(OpType::Sub, node, mul(tokens, context)?);
             }
@@ -352,11 +358,11 @@ fn mul(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
 
     loop {
         match tokens.get(context.pos) {
-            Some((Token::Op(OpType::Mul), _)) => {
+            Some((Token::SLSym('*'), _)) => {
                 context.pos += 1;
                 node = new_node_op(OpType::Mul, node, term(tokens, context)?);
             }
-            Some((Token::Op(OpType::Div), _)) => {
+            Some((Token::SLSym('/'), _)) => {
                 context.pos += 1;
                 node = new_node_op(OpType::Div, node, term(tokens, context)?);
             }
@@ -368,11 +374,11 @@ fn mul(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
 
 fn term(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
     match tokens.get(context.pos) {
-        Some((Token::ParenL, _)) => {
+        Some((Token::SLSym('('), _)) => {
             context.pos += 1;
             let node = add(tokens, context)?;
             match tokens.get(context.pos) {
-                Some((Token::ParenR, _pos)) => {
+                Some((Token::SLSym(')'), _pos)) => {
                     context.pos += 1;
                     Ok(node)
                 }
@@ -390,10 +396,10 @@ fn term(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
         }
         Some((Token::Ident(ref id), _)) => {
             context.pos += 1;
-            if let Some((Token::ParenL, _)) = tokens.get(context.pos) {
+            if let Some((Token::SLSym('('), _)) = tokens.get(context.pos) {
                 context.pos += 1;
                 let args = arguments(tokens, context)?;
-                expect(tokens, Token::ParenR, context)?;
+                consume(')', tokens, context)?;
                 return Ok(Node::Call(id.clone(), args));
             }
             Ok(Node::Ident(id.clone()))
@@ -415,7 +421,7 @@ fn arguments(tokens: &Tokens, context: &mut Context) -> Result<Vec<Node>, Error>
         _ => return Ok(nodes),
     }
 
-    while let Some((Token::Comma, _)) = tokens.get(context.pos) {
+    while let Some((Token::SLSym(','), _)) = tokens.get(context.pos) {
         context.pos += 1;
         nodes.push(assign(tokens, context)?);
     }
@@ -544,10 +550,9 @@ mod test {
 
         {
             let tokens = tokenize("a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
-            let p = stmts(&tokens);
-            assert_eq!(p.is_ok(), true);
+            let p = stmts(&tokens).unwrap();
             assert_eq!(
-                p.unwrap(),
+                p,
                 vec![
                     Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
                     Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
