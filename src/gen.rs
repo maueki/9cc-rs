@@ -13,6 +13,15 @@ lazy_static! {
 #[fail(display = "Gen Error: {}", _0)]
 pub struct GenError(String);
 
+pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
+    let mut context = Context::new();
+    for n in nodes {
+        gen(&n, &mut context)?;
+    }
+
+    Ok(())
+}
+
 fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
         Node::Ident(id) => {
@@ -26,7 +35,7 @@ fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     }
 }
 
-pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
+fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
     use super::OpType::*;
 
     match node {
@@ -189,7 +198,7 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
     }
 }
 
-pub struct Context<'a> {
+struct Context<'a> {
     var_map: VecDeque<(String, usize)>,
     cur_offset: usize,
     label_index: usize,
@@ -197,7 +206,7 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Context {
             var_map: VecDeque::new(),
             cur_offset: 0,
@@ -206,7 +215,7 @@ impl<'a> Context<'a> {
         }
     }
 
-    pub fn with_parent(parent: &'a Context<'a>) -> Self {
+    fn with_parent(parent: &'a Context<'a>) -> Self {
         Context {
             var_map: VecDeque::new(),
             cur_offset: 0,
@@ -238,7 +247,7 @@ impl<'a> Context<'a> {
         Err(GenError(format!("Undefine variable: {}", ident)).into())
     }
 
-    pub fn new_label(&mut self) -> String {
+    fn new_label(&mut self) -> String {
         let label = format!(".Label{}", self.label_index);
         self.label_index += 1;
         label

@@ -23,11 +23,8 @@ fn main() {
     println!(".global main");
 
     let input = &args[1];
-    let mut tokens = tokenize(&input).unwrap();
-    let nodes = program(&mut tokens).unwrap();
+    let tokens = tokenize(&input).unwrap();
+    let nodes = parse(&tokens).unwrap();
 
-    let mut context = Context::new();
-    for n in nodes {
-        gen(&n, &mut context).unwrap();
-    }
+    gen_code(nodes).unwrap();
 }
