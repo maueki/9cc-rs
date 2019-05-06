@@ -11,10 +11,13 @@ pub struct ParseError(String, usize);
 /// program: decl_func program
 /// program: ε
 ///
-/// decl_func: "int" ident "(" params ")" "{" stmt "}"
+/// decl_func: type ident "(" params ")" "{" stmt "}"
 ///
-/// params: "int" ident
-/// params: "int" ident, params
+/// params: type ident
+/// params: type ident, params
+///
+/// type: ident
+/// type: type "*"
 ///
 /// stmt: "{" block_items "}"
 /// stmt: assign ";"
@@ -27,7 +30,7 @@ pub struct ParseError(String, usize);
 ///
 /// ifclause: "if" "(" assign ")" stmt ["else" stmt]
 ///
-/// decl_var: "int" ident ";"
+/// decl_var: type ident ";"
 ///
 /// assign: equality
 /// assign: equality "=" assign
@@ -62,6 +65,19 @@ pub struct ParseError(String, usize);
 /// arguments: assign
 /// arguments: assign, arguments
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum TyType {
+    Int,
+    Custom(String),
+    Ptr(Box<TyType>),
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct Param {
+    pub ty: TyType,
+    pub name: String,
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum Node {
     Num(i64),
@@ -72,8 +88,8 @@ pub enum Node {
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
     Block(Vec<Node>),
     Call(String, Vec<Node>),
-    DeclFunc(String, Vec<String>, Vec<Node>),
-    DeclVar(String),
+    DeclFunc(String, Vec<Param>, Vec<Node>),
+    DeclVar(String, TyType),
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
@@ -127,7 +143,7 @@ fn program(tokens: &Tokens, context: &mut Context) -> Result<Vec<Node>, Error> {
 }
 
 fn decl_func(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
-    expect(tokens, Token::Int, context)?;
+    ty(tokens, context)?; // TODO
 
     let fname = match tokens.get(context.pos) {
         Some((Token::Ident(fname), _)) => {
@@ -154,40 +170,39 @@ fn decl_func(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
     Ok(Node::DeclFunc(fname.clone(), ps, nodes))
 }
 
-fn params(tokens: &Tokens, context: &mut Context) -> Result<Vec<String>, Error> {
+fn params(tokens: &Tokens, context: &mut Context) -> Result<Vec<Param>, Error> {
     let mut ps = Vec::new();
-    loop {
-        match tokens.get(context.pos) {
-            Some((Token::Int, _)) => {
-                context.pos += 1;
-            }
-            _ => return Ok(ps),
-        }
 
+    while let Ok(param_type) = ty(tokens, context) {
         match tokens.get(context.pos) {
             Some((Token::Ident(pname), _)) => {
-                ps.push(pname.clone());
+                ps.push(Param {
+                    ty: param_type,
+                    name: pname.clone(),
+                });
                 context.pos += 1;
             }
-            _ => break,
+            _ => return Err(ParseError("params: Unexpected Token".to_owned(), 0).into()),
         }
 
         match tokens.get(context.pos) {
             Some((Token::Comma, _)) => {
                 context.pos += 1;
             }
-            _ => return Ok(ps),
+            _ => break,
         }
     }
 
-    Err(ParseError("params: Unexpected Token".to_owned(), 0).into())
+    Ok(ps)
 }
 
 fn stmt(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
-    let node = match tokens.get(context.pos) {
+    match tokens.get(context.pos) {
         Some((Token::Return, _)) => {
             context.pos += 1;
-            new_node_return(assign(tokens, context)?)
+            let node = new_node_return(assign(tokens, context)?);
+            expect(tokens, Token::Semicolon, context)?;
+            Ok(node)
         }
         Some((Token::If, _)) => {
             context.pos += 1;
@@ -201,7 +216,7 @@ fn stmt(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
                 _ => None,
             };
 
-            return Ok(new_node_if(node_cond, node_then, node_else));
+            Ok(new_node_if(node_cond, node_then, node_else))
         }
         Some((Token::BraceL, _)) => {
             context.pos += 1;
@@ -210,27 +225,57 @@ fn stmt(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
                 stmts.push(node);
             }
             expect(tokens, Token::BraceR, context)?;
-            return Ok(Node::Block(stmts));
+            Ok(Node::Block(stmts))
         }
-        Some((Token::Int, pos)) => {
-            if let Some((Token::Ident(var), _)) = tokens.get(context.pos + 1) {
-                if let Some((Token::Semicolon, _)) = tokens.get(context.pos + 2) {
-                    let node = Node::DeclVar(var.to_string());
-                    context.pos += 3;
-                    return Ok(node);
-                }
+        _ => {
+            let pos = context.pos;
+            if let Ok(node) = decl_var(tokens, context) {
+                Ok(node)
+            } else {
+                context.pos = pos;
+                let node = assign(tokens, context)?;
+                expect(tokens, Token::Semicolon, context)?;
+                Ok(node)
             }
-            return Err(ParseError("stmt: Unexpected Token".to_owned(), *pos).into());
         }
-        _ => assign(tokens, context)?,
+    }
+}
+
+fn decl_var(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
+    let t = ty(tokens, context)?;
+
+    if let Some((Token::Ident(var), _)) = tokens.get(context.pos) {
+        if let Some((Token::Semicolon, _)) = tokens.get(context.pos + 1) {
+            let node = Node::DeclVar(var.to_string(), t);
+            context.pos += 2;
+            return Ok(node);
+        }
+    }
+    return Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into());
+}
+
+fn str2ty(s: &str) -> TyType {
+    match s {
+        "int" => TyType::Int,
+        _ => TyType::Custom(s.to_string()),
+    }
+}
+
+fn ty(tokens: &Tokens, context: &mut Context) -> Result<TyType, Error> {
+    let mut tytype = match tokens.get(context.pos) {
+        Some((Token::Ident(tname), _)) => {
+            context.pos += 1;
+            str2ty(tname)
+        }
+        _ => return Err(ParseError("ty: Unexpected Token".to_owned(), 0).into()),
     };
 
-    if let Some((Token::Semicolon, _)) = tokens.get(context.pos) {
+    while let Some((Token::Op(OpType::Mul), _)) = tokens.get(context.pos) {
         context.pos += 1;
-        Ok(node)
-    } else {
-        Err(ParseError("';'ではないトークンです".to_owned(), 0).into())
+        tytype = TyType::Ptr(Box::new(tytype));
     }
+
+    Ok(tytype)
 }
 
 fn assign(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
@@ -329,23 +374,19 @@ fn term(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
             match tokens.get(context.pos) {
                 Some((Token::ParenR, _pos)) => {
                     context.pos += 1;
+                    Ok(node)
                 }
-                Some((_, pos)) => {
-                    return Err(ParseError(
-                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                        *pos,
-                    )
-                    .into());
-                }
-                None => {
-                    return Err(ParseError("想定されないEOFです".to_owned(), 0).into());
-                }
+                Some((_, pos)) => Err(ParseError(
+                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                    *pos,
+                )
+                .into()),
+                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
             }
-            return Ok(node);
         }
         Some((Token::Num(n), _)) => {
             context.pos += 1;
-            return Ok(new_node_num(*n));
+            Ok(new_node_num(*n))
         }
         Some((Token::Ident(ref id), _)) => {
             context.pos += 1;
@@ -355,17 +396,15 @@ fn term(tokens: &Tokens, context: &mut Context) -> Result<Node, Error> {
                 expect(tokens, Token::ParenR, context)?;
                 return Ok(Node::Call(id.clone(), args));
             }
-            return Ok(Node::Ident(id.clone()));
+            Ok(Node::Ident(id.clone()))
         }
-        Some(..) => {}
-        _ => return Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
+        Some(..) => Err(ParseError(
+            "数値でも閉じ括弧でもないトークンです".to_owned(),
+            tokens[0].1,
+        )
+        .into()),
+        _ => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
     }
-
-    Err(ParseError(
-        "数値でも閉じ括弧でもないトークンです".to_owned(),
-        tokens[0].1,
-    )
-    .into())
 }
 
 fn arguments(tokens: &Tokens, context: &mut Context) -> Result<Vec<Node>, Error> {
@@ -555,6 +594,22 @@ mod test {
                     "main".to_owned(),
                     Vec::new(),
                     vec![Return(Box::new(Num(0)))]
+                )]
+            );
+        }
+
+        {
+            let tokens = tokenize("int hoge() { int* a; return 0; }").unwrap();
+            let p = parse(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![DeclFunc(
+                    "hoge".to_owned(),
+                    Vec::new(),
+                    vec![
+                        DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                        Return(Box::new(Num(0)))
+                    ]
                 )]
             );
         }

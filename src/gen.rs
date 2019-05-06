@@ -173,7 +173,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  sub rsp, 208"); // FIXME:
 
             for (i, p) in params.iter().enumerate() {
-                let offset = context.var_put(p);
+                let offset = context.var_put(&p.name);
                 println!("  mov rax, rbp");
                 println!("  sub rax, {}", offset);
                 println!("  mov [rax], {}", REG_ARGS[i]);
@@ -191,7 +191,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
 
             Ok(())
         }
-        Node::DeclVar(ident) => {
+        Node::DeclVar(ident, _ty) => {
             context.var_put(ident);
             Ok(())
         }
