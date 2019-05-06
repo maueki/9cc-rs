@@ -16,7 +16,7 @@ pub struct GenError(String);
 fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
         Node::Ident(id) => {
-            let offset = context.var_put(id);
+            let offset = context.var_get(id)?;
             println!("  mov rax, rbp");
             println!("  sub rax, {}", offset);
             println!("  push rax");
@@ -182,6 +182,10 @@ pub fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
 
             Ok(())
         }
+        Node::DeclVar(ident) => {
+            context.var_put(ident);
+            Ok(())
+        }
     }
 }
 
@@ -224,15 +228,15 @@ impl<'a> Context<'a> {
         self.cur_offset
     }
 
-    /*    fn var_get(&mut self, ident: String) -> Option<usize> {
+    fn var_get(&mut self, ident: &String) -> Result<usize, Error> {
         for var in self.var_map.iter() {
-            if var.0 == ident {
-                return Some(var.1);
+            if var.0 == *ident {
+                return Ok(var.1);
             }
         }
 
-        None
-    }*/
+        Err(GenError(format!("Undefine variable: {}", ident)).into())
+    }
 
     pub fn new_label(&mut self) -> String {
         let label = format!(".Label{}", self.label_index);

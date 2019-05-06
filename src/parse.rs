@@ -11,17 +11,23 @@ pub struct ParseError(String, usize);
 /// program: decl_func program
 /// program: ε
 ///
-/// decl_func: ident "(" params ")" "{" stmt "}"
+/// decl_func: "int" ident "(" params ")" "{" stmt "}"
+///
+/// params: "int" ident
+/// params: "int" ident, params
 ///
 /// stmt: "{" block_items "}"
 /// stmt: assign ";"
 /// stmt: "return" assign ";"
 /// stmt: ifclause
+/// stmt: decl_var
 ///
 /// block_items: stmt
 /// block_items: stmt block_items
 ///
 /// ifclause: "if" "(" assign ")" stmt ["else" stmt]
+///
+/// decl_var: "int" ident ";"
 ///
 /// assign: equality
 /// assign: equality "=" assign
@@ -67,6 +73,7 @@ pub enum Node {
     Block(Vec<Node>),
     Call(String, Vec<Node>),
     DeclFunc(String, Vec<String>, Vec<Node>),
+    DeclVar(String),
 }
 
 fn new_node_num(v: i64) -> Node {
@@ -112,6 +119,8 @@ pub fn program(tokens: &mut Tokens) -> Result<Vec<Node>, Error> {
 }
 
 fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
+    expect(tokens, Token::Int)?;
+
     let fname = match tokens.pop_front() {
         Some((Token::Ident(fname), _)) => fname,
         Some((_, pos)) => {
@@ -120,25 +129,8 @@ fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
         _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
     };
 
-    let mut params = Vec::new();
-
     expect(tokens, Token::ParenL)?;
-    loop {
-        match tokens.get(0) {
-            Some((Token::Ident(pname), _)) => {
-                params.push(pname.clone());
-                tokens.pop_front();
-            }
-            _ => break,
-        }
-
-        match tokens.get(0) {
-            Some((Token::Comma, _)) => {
-                tokens.pop_front();
-            }
-            _ => break,
-        }
-    }
+    let ps = params(tokens)?;
     expect(tokens, Token::ParenR)?;
 
     expect(tokens, Token::BraceL)?;
@@ -148,7 +140,36 @@ fn decl_func(tokens: &mut Tokens) -> Result<Node, Error> {
     }
     expect(tokens, Token::BraceR)?;
 
-    Ok(Node::DeclFunc(fname, params, nodes))
+    Ok(Node::DeclFunc(fname, ps, nodes))
+}
+
+fn params(tokens: &mut Tokens) -> Result<Vec<String>, Error> {
+    let mut ps = Vec::new();
+    loop {
+        match tokens.get(0) {
+            Some((Token::Int, _)) => {
+                tokens.pop_front();
+            }
+            _ => return Ok(ps),
+        }
+
+        match tokens.get(0) {
+            Some((Token::Ident(pname), _)) => {
+                ps.push(pname.clone());
+                tokens.pop_front();
+            }
+            _ => break,
+        }
+
+        match tokens.get(0) {
+            Some((Token::Comma, _)) => {
+                tokens.pop_front();
+            }
+            _ => return Ok(ps),
+        }
+    }
+
+    Err(ParseError("params: Unexpected Token".to_owned(), 0).into())
 }
 
 fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
@@ -179,6 +200,18 @@ fn stmt(tokens: &mut Tokens) -> Result<Node, Error> {
             }
             expect(tokens, Token::BraceR)?;
             return Ok(Node::Block(stmts));
+        }
+        Some((Token::Int, pos)) => {
+            if let Some((Token::Ident(var), _)) = tokens.get(1) {
+                if let Some((Token::Semicolon, _)) = tokens.get(2) {
+                    let node = Node::DeclVar(var.to_string());
+                    tokens.pop_front();
+                    tokens.pop_front();
+                    tokens.pop_front();
+                    return Ok(node);
+                }
+            }
+            return Err(ParseError("stmt: Unexpected Token".to_owned(), *pos).into());
         }
         _ => assign(tokens)?,
     };
@@ -489,7 +522,7 @@ mod test {
     fn program_tset() {
         use super::Node::*;
         {
-            let mut tokens = tokenize("main() { return 0; }").unwrap();
+            let mut tokens = tokenize("int main() { return 0; }").unwrap();
             let p = program(&mut tokens).unwrap();
             assert_eq!(
                 p,

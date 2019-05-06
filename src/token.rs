@@ -22,6 +22,7 @@ pub enum Token {
     Else,
     Eof,
     Comma,
+    Int,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -57,6 +58,7 @@ lazy_static! {
         v.push(("if", If));
         v.push(("else", Else));
         v.push(("return", Return));
+        v.push(("int", Int));
         v
     };
 }
