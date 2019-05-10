@@ -6,6 +6,18 @@ use super::token::*;
 #[fail(display = "Parse Error: {}, pos: {}", _0, _1)]
 pub struct ParseError(String, usize);
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Ne,
+    Le,
+    Ge,
+}
+
 /// parser syntax
 ///
 /// program: decl_func program
@@ -64,7 +76,6 @@ pub struct ParseError(String, usize);
 ///
 /// arguments: assign
 /// arguments: assign, arguments
-
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TyType {
     Int,
@@ -81,7 +92,7 @@ pub struct Param {
 #[derive(PartialEq, Eq, Debug)]
 pub enum Node {
     Num(i64),
-    Op(OpType, Box<Node>, Box<Node>),
+    Bin(BinOp, Box<Node>, Box<Node>),
     Assign(Box<Node>, Box<Node>),
     Ident(String),
     Return(Box<Node>),
@@ -101,8 +112,8 @@ fn new_node_num(v: i64) -> Node {
     Node::Num(v)
 }
 
-fn new_node_op(ty: OpType, lhs: Node, rhs: Node) -> Node {
-    Node::Op(ty, Box::new(lhs), Box::new(rhs))
+fn new_node_bin(ty: BinOp, lhs: Node, rhs: Node) -> Node {
+    Node::Bin(ty, Box::new(lhs), Box::new(rhs))
 }
 
 fn new_node_assign(lhs: Node, rhs: Node) -> Node {
@@ -117,11 +128,17 @@ fn new_node_if(cond: Node, t: Node, e: Option<Node>) -> Node {
     Node::If(Box::new(cond), Box::new(t), e.map(Box::new))
 }
 
+fn new_node_ident(s: &str) -> Node {
+    Node::Ident(s.to_string())
+}
+
 fn consume(c: char, context: &mut Context) -> Result<(), Error> {
     match context.pop_token() {
-        Some((Token::SLSym(sym), _)) if *sym == c => Ok(()),
+        Some((Token::Sym(sym), _)) if *sym == c => Ok(()),
         Some((tk, pos)) => {
-            Err(ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into())
+            Err(
+                ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into(),
+            )
         }
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
@@ -155,7 +172,9 @@ fn decl_func(context: &mut Context) -> Result<Node, Error> {
         let fname = match context.pop_token() {
             Some((Token::Ident(fname), _)) => fname,
             Some((_, pos)) => {
-                return Err(ParseError("不適切な関数名です".to_owned(), *pos).into())
+                return Err(
+                    ParseError("不適切な関数名です".to_owned(), *pos).into(),
+                )
             }
             _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
         };
@@ -191,7 +210,7 @@ fn params(context: &mut Context) -> Result<Vec<Param>, Error> {
         }
 
         match context.front_token() {
-            Some((Token::SLSym(','), _)) => {
+            Some((Token::Sym(','), _)) => {
                 context.pop_token();
             }
             _ => break,
@@ -223,7 +242,7 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
 
             Ok(new_node_if(node_cond, node_then, node_else))
         }
-        Some((Token::SLSym('{'), _)) => {
+        Some((Token::Sym('{'), _)) => {
             context.pop_token();
             let mut stmts = Vec::new();
             while let Ok(node) = stmt(context) {
@@ -254,7 +273,9 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
         consume(';', context)?;
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
-        Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
+        Err(
+            ParseError("decl_var: Unexpected Token".to_owned(), 0).into(),
+        )
     }
 }
 
@@ -273,7 +294,7 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
 
     context.pop_token();
 
-    while let Some((Token::SLSym('*'), _)) = context.front_token() {
+    while let Some((Token::Sym('*'), _)) = context.front_token() {
         context.pop_token();
         tytype = TyType::Ptr(Box::new(tytype));
     }
@@ -283,7 +304,7 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
 
 fn assign(context: &mut Context) -> Result<Node, Error> {
     let mut node = equality(context)?;
-    while let Some((Token::SLSym('='), _)) = context.front_token() {
+    while let Some((Token::Sym('='), _)) = context.front_token() {
         context.pop_token();
         node = new_node_assign(node, assign(context)?);
     }
@@ -297,11 +318,11 @@ fn equality(context: &mut Context) -> Result<Node, Error> {
         match context.front_token() {
             Some((Token::Op(OpType::Eq), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Eq, node, relational(context)?);
+                node = new_node_bin(BinOp::Eq, node, relational(context)?);
             }
             Some((Token::Op(OpType::Ne), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Ne, node, relational(context)?);
+                node = new_node_bin(BinOp::Ne, node, relational(context)?);
             }
             _ => break,
         }
@@ -316,11 +337,11 @@ fn relational(context: &mut Context) -> Result<Node, Error> {
         match context.front_token() {
             Some((Token::Op(OpType::Le), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Le, node, add(context)?);
+                node = new_node_bin(BinOp::Le, node, add(context)?);
             }
             Some((Token::Op(OpType::Ge), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Ge, node, add(context)?);
+                node = new_node_bin(BinOp::Ge, node, add(context)?);
             }
             _ => break,
         }
@@ -333,13 +354,13 @@ fn add(context: &mut Context) -> Result<Node, Error> {
 
     loop {
         match context.front_token() {
-            Some((Token::SLSym('+'), _)) => {
+            Some((Token::Sym('+'), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Add, node, mul(context)?);
+                node = new_node_bin(BinOp::Add, node, mul(context)?);
             }
-            Some((Token::SLSym('-'), _)) => {
+            Some((Token::Sym('-'), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Sub, node, mul(context)?);
+                node = new_node_bin(BinOp::Sub, node, mul(context)?);
             }
             _ => break,
         }
@@ -353,13 +374,13 @@ fn mul(context: &mut Context) -> Result<Node, Error> {
 
     loop {
         match context.front_token() {
-            Some((Token::SLSym('*'), _)) => {
+            Some((Token::Sym('*'), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Mul, node, term(context)?);
+                node = new_node_bin(BinOp::Mul, node, term(context)?);
             }
-            Some((Token::SLSym('/'), _)) => {
+            Some((Token::Sym('/'), _)) => {
                 context.pop_token();
-                node = new_node_op(OpType::Div, node, term(context)?);
+                node = new_node_bin(BinOp::Div, node, term(context)?);
             }
             _ => break,
         }
@@ -369,20 +390,23 @@ fn mul(context: &mut Context) -> Result<Node, Error> {
 
 fn term(context: &mut Context) -> Result<Node, Error> {
     match context.front_token() {
-        Some((Token::SLSym('('), _)) => {
+        Some((Token::Sym('('), _)) => {
             context.pop_token();
             let node = add(context)?;
             match context.front_token() {
-                Some((Token::SLSym(')'), _pos)) => {
+                Some((Token::Sym(')'), _pos)) => {
                     context.pop_token();
                     Ok(node)
                 }
-                Some((_, pos)) => Err(ParseError(
-                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                    *pos,
-                )
-                .into()),
-                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
+                Some((_, pos)) => Err(
+                    ParseError(
+                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                        *pos,
+                    ).into(),
+                ),
+                None => Err(
+                    ParseError("想定されないEOFです".to_owned(), 0).into(),
+                ),
             }
         }
         Some((Token::Num(n), _)) => {
@@ -393,20 +417,23 @@ fn term(context: &mut Context) -> Result<Node, Error> {
         Some((Token::Ident(id), _)) => {
             let id = id.clone();
             context.pop_token();
-            if let Some((Token::SLSym('('), _)) = context.front_token() {
+            if let Some((Token::Sym('('), _)) = context.front_token() {
                 context.pop_token();
                 let args = arguments(context)?;
                 consume(')', context)?;
                 return Ok(Node::Call(id, args));
             }
-            Ok(Node::Ident(id))
+            Ok(new_node_ident(&id))
         }
-        Some((_, pos)) => Err(ParseError(
-            "数値でも閉じ括弧でもないトークンです".to_owned(),
-            *pos,
-        )
-        .into()),
-        _ => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
+        Some((_, pos)) => Err(
+            ParseError(
+                "数値でも閉じ括弧でもないトークンです".to_owned(),
+                *pos,
+            ).into(),
+        ),
+        _ => Err(
+            ParseError("想定されないEOFです".to_owned(), 0).into(),
+        ),
     }
 }
 
@@ -418,7 +445,7 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
         _ => return Ok(nodes),
     }
 
-    while let Some((Token::SLSym(','), _)) = context.front_token() {
+    while let Some((Token::Sym(','), _)) = context.front_token() {
         context.pop_token();
         nodes.push(assign(context)?);
     }
@@ -449,7 +476,7 @@ impl<'a> Context<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::OpType::*;
+    use super::BinOp::*;
     use super::*;
 
     #[test]
@@ -460,7 +487,7 @@ mod test {
             let mut context = Context::new(&tokens);
             assert_eq!(
                 add(&mut context).unwrap(),
-                Op(Add, Box::new(Num(1)), Box::new(Num(1)))
+                new_node_bin(Add, Num(1), Num(1))
             );
         }
 
@@ -469,11 +496,7 @@ mod test {
             let mut context = Context::new(&tokens);
             assert_eq!(
                 add(&mut context).unwrap(),
-                Op(
-                    Div,
-                    Box::new(Op(Add, Box::new(Num(3)), Box::new(Num(5)))),
-                    Box::new(Num(2))
-                )
+                new_node_bin(Div, new_node_bin(Add, Num(3), Num(5)), Num(2))
             );
         }
     }
@@ -513,13 +536,9 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
-                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
-                    Op(
-                        OpType::Add,
-                        Box::new(Ident("a".to_owned())),
-                        Box::new(Ident("b".to_owned()))
-                    )
+                    new_node_assign(new_node_ident("a"), Num(1)),
+                    new_node_assign(new_node_ident("b"), Num(2)),
+                    new_node_bin(Add, new_node_ident("a"), new_node_ident("b")),
                 ]
             );
         }
@@ -531,13 +550,9 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
-                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
-                    Return(Box::new(Op(
-                        OpType::Add,
-                        Box::new(Ident("a".to_owned())),
-                        Box::new(Ident("b".to_owned()))
-                    )))
+                    new_node_assign(new_node_ident("a"), Num(1)),
+                    new_node_assign(new_node_ident("b"), Num(2)),
+                    new_node_return(new_node_bin(Add, new_node_ident("a"), new_node_ident("b"))),
                 ]
             );
         }
@@ -549,16 +564,13 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    Assign(Box::new(Ident("foo".to_owned())), Box::new(Num(1))),
-                    Assign(
-                        Box::new(Ident("bar".to_owned())),
-                        Box::new(Op(Add, Box::new(Num(2)), Box::new(Num(3))))
-                    ),
-                    Return(Box::new(Op(
-                        OpType::Add,
-                        Box::new(Ident("foo".to_owned())),
-                        Box::new(Ident("bar".to_owned()))
-                    )))
+                    new_node_assign(new_node_ident("foo"), Num(1)),
+                    new_node_assign(new_node_ident("bar"), new_node_bin(Add, Num(2), Num(3))),
+                    new_node_return(new_node_bin(
+                        Add,
+                        new_node_ident("foo"),
+                        new_node_ident("bar"),
+                    )),
                 ]
             );
         }
@@ -569,20 +581,12 @@ mod test {
             assert_eq!(
                 p,
                 vec![
-                    Assign(Box::new(Ident("a".to_owned())), Box::new(Num(1))),
-                    Assign(Box::new(Ident("b".to_owned())), Box::new(Num(2))),
-                    If(
-                        Box::new(Op(
-                            Eq,
-                            Box::new(Ident("a".to_owned())),
-                            Box::new(Ident("b".to_owned()))
-                        )),
-                        Box::new(Return(Box::new(Op(
-                            Add,
-                            Box::new(Ident("a".to_owned())),
-                            Box::new(Ident("b".to_owned()))
-                        )))),
-                        Some(Box::new(Return(Box::new(Num(0)))))
+                    new_node_assign(new_node_ident("a"), Num(1)),
+                    new_node_assign(new_node_ident("b"), Num(2)),
+                    new_node_if(
+                        new_node_bin(Eq, new_node_ident("a"), new_node_ident("b")),
+                        new_node_return(new_node_bin(Add, new_node_ident("a"), new_node_ident("b"))),
+                        Some(new_node_return(Num(0)))
                     ),
                 ]
             );
@@ -594,10 +598,9 @@ mod test {
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
-                vec![Call(
-                    "foo".to_owned(),
-                    vec![Num(1), Num(2), Ident("a".to_owned())]
-                )]
+                vec![
+                    Call("foo".to_owned(), vec![Num(1), Num(2), new_node_ident("a")]),
+                ]
             );
         }
     }
@@ -610,11 +613,9 @@ mod test {
             let p = parse(&tokens);
             assert_eq!(
                 p.unwrap(),
-                vec![DeclFunc(
-                    "main".to_owned(),
-                    Vec::new(),
-                    vec![Return(Box::new(Num(0)))]
-                )]
+                vec![
+                    DeclFunc("main".to_owned(), Vec::new(), vec![new_node_return(Num(0))]),
+                ]
             );
         }
 
@@ -623,14 +624,16 @@ mod test {
             let p = parse(&tokens).unwrap();
             assert_eq!(
                 p,
-                vec![DeclFunc(
-                    "hoge".to_owned(),
-                    Vec::new(),
-                    vec![
-                        DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
-                        Return(Box::new(Num(0)))
-                    ]
-                )]
+                vec![
+                    DeclFunc(
+                        "hoge".to_owned(),
+                        Vec::new(),
+                        vec![
+                            DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                            Return(Box::new(Num(0))),
+                        ]
+                    ),
+                ]
             );
         }
     }
