@@ -79,7 +79,6 @@ pub enum BinOp {
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TyType {
     Int,
-    Custom(String),
     Ptr(Box<TyType>),
 }
 
@@ -278,16 +277,16 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
     }
 }
 
-fn str2ty(s: &str) -> TyType {
+fn str2ty(s: &str) -> Result<TyType, Error> {
     match s {
-        "int" => TyType::Int,
-        _ => TyType::Custom(s.to_string()),
+        "int" => Ok(TyType::Int),
+        _ => Err(ParseError(format!("Invalid Type: {}", s), 0).into()),
     }
 }
 
 fn ty(context: &mut Context) -> Result<TyType, Error> {
     let mut tytype = match context.front_token() {
-        Some((Token::Ident(tname), _)) => str2ty(tname),
+        Some((Token::Ident(tname), _)) => str2ty(tname)?,
         _ => return Err(ParseError("ty: Unexpected Token".to_owned(), 0).into()),
     };
 
