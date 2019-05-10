@@ -101,6 +101,8 @@ pub enum Node {
     Call(String, Vec<Node>),
     DeclFunc(String, Vec<Param>, Vec<Node>),
     DeclVar(String, TyType),
+    Addr(Box<Node>),
+    Deref(Box<Node>),
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
@@ -133,8 +135,11 @@ fn new_node_ident(s: &str) -> Node {
 }
 
 fn consume(c: char, context: &mut Context) -> Result<(), Error> {
-    match context.pop_token() {
-        Some((Token::Sym(sym), _)) if *sym == c => Ok(()),
+    match context.front_token() {
+        Some((Token::Sym(sym), _)) if *sym == c => {
+            context.pop_token();
+            Ok(())
+        }
         Some((tk, pos)) => {
             Err(
                 ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into(),
@@ -370,22 +375,34 @@ fn add(context: &mut Context) -> Result<Node, Error> {
 }
 
 fn mul(context: &mut Context) -> Result<Node, Error> {
-    let mut node = term(context)?;
+    let mut node = unary(context)?;
 
     loop {
         match context.front_token() {
             Some((Token::Sym('*'), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Mul, node, term(context)?);
+                node = new_node_bin(BinOp::Mul, node, unary(context)?);
             }
             Some((Token::Sym('/'), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Div, node, term(context)?);
+                node = new_node_bin(BinOp::Div, node, unary(context)?);
             }
             _ => break,
         }
     }
     Ok(node)
+}
+
+fn unary(context: &mut Context) -> Result<Node, Error> {
+    if let Ok(..) = consume('*', context) {
+        return Ok(Node::Deref(Box::new(term(context)?)));
+    }
+
+    if let Ok(..) = consume('&', context) {
+        return Ok(Node::Addr(Box::new(term(context)?)));
+    }
+
+    term(context)
 }
 
 fn term(context: &mut Context) -> Result<Node, Error> {
@@ -600,6 +617,21 @@ mod test {
                 p.unwrap(),
                 vec![
                     Call("foo".to_owned(), vec![Num(1), Num(2), new_node_ident("a")]),
+                ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int x; x=3; int *y; y=&x; return *y;").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![
+                    DeclVar("x".to_owned(), TyType::Int),
+                    new_node_assign(new_node_ident("x"), Num(3)),
+                    DeclVar("y".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                    new_node_assign(new_node_ident("y"), Addr(Box::new(new_node_ident("x")))),
+                    new_node_return(Deref(Box::new(new_node_ident("y")))),
                 ]
             );
         }

@@ -203,6 +203,14 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             context.var_put(ident);
             Ok(())
         }
+        Node::Deref(..) => {
+            // TODO:
+            Ok(())
+        }
+        Node::Addr(..) => {
+            // TDDO:
+            Ok(())
+        }
     }
 }
 
