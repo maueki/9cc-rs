@@ -81,8 +81,8 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
                 continue;
             }
 
-            if *sym ==
-                chars[pos..pos + sym.len()]
+            if *sym
+                == chars[pos..pos + sym.len()]
                     .iter()
                     .collect::<String>()
                     .as_str()
@@ -95,9 +95,9 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
             }
         }
 
-        if let Some(..) = "+-*/;=(),{}<>[]&.!?:|^%~#".chars().find(
-            |&c| c == chars[pos],
-        )
+        if let Some(..) = "+-*/;=(),{}<>[]&.!?:|^%~#"
+            .chars()
+            .find(|&c| c == chars[pos])
         {
             tokens.push_back((Token::Sym(chars[pos]), pos));
             pos += 1;
@@ -122,15 +122,14 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
             continue;
         }
 
-        return Err(
-            TokenizeError(
-                format!(
-                    "トークナイズできません: {}",
-                    chars[pos..].iter().collect::<String>()
-                ),
-                pos,
-            ).into(),
-        );
+        return Err(TokenizeError(
+            format!(
+                "トークナイズできません: {}",
+                chars[pos..].iter().collect::<String>()
+            ),
+            pos,
+        )
+        .into());
     }
 
     tokens.push_back((Token::Eof, pos));

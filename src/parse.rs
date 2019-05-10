@@ -141,9 +141,7 @@ fn consume(c: char, context: &mut Context) -> Result<(), Error> {
             Ok(())
         }
         Some((tk, pos)) => {
-            Err(
-                ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into(),
-            )
+            Err(ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into())
         }
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
@@ -177,9 +175,7 @@ fn decl_func(context: &mut Context) -> Result<Node, Error> {
         let fname = match context.pop_token() {
             Some((Token::Ident(fname), _)) => fname,
             Some((_, pos)) => {
-                return Err(
-                    ParseError("不適切な関数名です".to_owned(), *pos).into(),
-                )
+                return Err(ParseError("不適切な関数名です".to_owned(), *pos).into())
             }
             _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
         };
@@ -278,9 +274,7 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
         consume(';', context)?;
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
-        Err(
-            ParseError("decl_var: Unexpected Token".to_owned(), 0).into(),
-        )
+        Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
     }
 }
 
@@ -415,15 +409,12 @@ fn term(context: &mut Context) -> Result<Node, Error> {
                     context.pop_token();
                     Ok(node)
                 }
-                Some((_, pos)) => Err(
-                    ParseError(
-                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                        *pos,
-                    ).into(),
-                ),
-                None => Err(
-                    ParseError("想定されないEOFです".to_owned(), 0).into(),
-                ),
+                Some((_, pos)) => Err(ParseError(
+                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                    *pos,
+                )
+                .into()),
+                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
             }
         }
         Some((Token::Num(n), _)) => {
@@ -442,15 +433,12 @@ fn term(context: &mut Context) -> Result<Node, Error> {
             }
             Ok(new_node_ident(&id))
         }
-        Some((_, pos)) => Err(
-            ParseError(
-                "数値でも閉じ括弧でもないトークンです".to_owned(),
-                *pos,
-            ).into(),
-        ),
-        _ => Err(
-            ParseError("想定されないEOFです".to_owned(), 0).into(),
-        ),
+        Some((_, pos)) => Err(ParseError(
+            "数値でも閉じ括弧でもないトークンです".to_owned(),
+            *pos,
+        )
+        .into()),
+        _ => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
     }
 }
 
@@ -602,7 +590,11 @@ mod test {
                     new_node_assign(new_node_ident("b"), Num(2)),
                     new_node_if(
                         new_node_bin(Eq, new_node_ident("a"), new_node_ident("b")),
-                        new_node_return(new_node_bin(Add, new_node_ident("a"), new_node_ident("b"))),
+                        new_node_return(new_node_bin(
+                            Add,
+                            new_node_ident("a"),
+                            new_node_ident("b")
+                        )),
                         Some(new_node_return(Num(0)))
                     ),
                 ]
@@ -615,9 +607,10 @@ mod test {
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
-                vec![
-                    Call("foo".to_owned(), vec![Num(1), Num(2), new_node_ident("a")]),
-                ]
+                vec![Call(
+                    "foo".to_owned(),
+                    vec![Num(1), Num(2), new_node_ident("a")]
+                ),]
             );
         }
 
@@ -645,9 +638,11 @@ mod test {
             let p = parse(&tokens);
             assert_eq!(
                 p.unwrap(),
-                vec![
-                    DeclFunc("main".to_owned(), Vec::new(), vec![new_node_return(Num(0))]),
-                ]
+                vec![DeclFunc(
+                    "main".to_owned(),
+                    Vec::new(),
+                    vec![new_node_return(Num(0))]
+                ),]
             );
         }
 
@@ -656,16 +651,14 @@ mod test {
             let p = parse(&tokens).unwrap();
             assert_eq!(
                 p,
-                vec![
-                    DeclFunc(
-                        "hoge".to_owned(),
-                        Vec::new(),
-                        vec![
-                            DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
-                            Return(Box::new(Num(0))),
-                        ]
-                    ),
-                ]
+                vec![DeclFunc(
+                    "hoge".to_owned(),
+                    Vec::new(),
+                    vec![
+                        DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                        Return(Box::new(Num(0))),
+                    ]
+                ),]
             );
         }
     }

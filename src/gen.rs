@@ -32,11 +32,7 @@ fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
             Ok(())
         }
         Node::Deref(ptr) => gen(ptr, context),
-        _ => Err(
-            GenError(
-                "代入の左辺値が変数ではありません".to_owned(),
-            ).into(),
-        ),
+        _ => Err(GenError("代入の左辺値が変数ではありません".to_owned()).into()),
     }
 }
 
@@ -144,9 +140,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
         }
         Node::Call(fname, args) => {
             if args.len() > REG_ARGS.len() {
-                return Err(
-                    GenError(format!("{}: 引数が多すぎます", fname)).into(),
-                );
+                return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
             }
 
             for node in args.iter().rev() {
@@ -170,9 +164,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
         }
         Node::DeclFunc(fname, params, stmts) => {
             if params.len() > REG_ARGS.len() {
-                return Err(
-                    GenError(format!("{}: 引数が多すぎます", fname)).into(),
-                );
+                return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
             }
 
             let mut context = Context::with_parent(context);
@@ -249,9 +241,8 @@ impl<'a> Context<'a> {
         }
 
         self.cur_offset += 8;
-        self.var_map.push_front(
-            (ident.to_string(), self.cur_offset),
-        );
+        self.var_map
+            .push_front((ident.to_string(), self.cur_offset));
         self.cur_offset
     }
 
