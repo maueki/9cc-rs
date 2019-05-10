@@ -31,6 +31,7 @@ fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
+        Node::Deref(ptr) => gen(ptr, context),
         _ => Err(
             GenError(
                 "代入の左辺値が変数ではありません".to_owned(),
@@ -203,14 +204,14 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             context.var_put(ident);
             Ok(())
         }
-        Node::Deref(..) => {
-            // TODO:
+        Node::Deref(ptr) => {
+            gen(ptr, context)?;
+            println!("  pop rax");
+            println!("  mov rax, [rax]");
+            println!("  push rax");
             Ok(())
         }
-        Node::Addr(..) => {
-            // TDDO:
-            Ok(())
-        }
+        Node::Addr(id) => gen_lval(id, context),
     }
 }
 
