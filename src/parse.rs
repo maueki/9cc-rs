@@ -80,6 +80,17 @@ pub enum BinOp {
 pub enum TyType {
     Int,
     Ptr(Box<TyType>),
+    Void,
+}
+
+impl TyType {
+    pub fn size(&self) -> usize {
+        match self {
+            TyType::Int => 4,
+            TyType::Ptr(..) => 8,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]

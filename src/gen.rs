@@ -22,21 +22,21 @@ pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
     Ok(())
 }
 
-fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
+fn gen_lval(node: &Node, context: &mut Context) -> Result<TyType, Error> {
     match node {
         Node::Ident(id) => {
-            let offset = context.var_get(id)?;
+            let (ty, offset) = context.var_get(id)?;
             println!("  mov rax, rbp");
             println!("  sub rax, {}", offset);
             println!("  push rax");
-            Ok(())
+            Ok(ty)
         }
         Node::Deref(ptr) => gen(ptr, context),
         _ => Err(GenError("代入の左辺値が変数ではありません".to_owned()).into()),
     }
 }
 
-fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
+fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
     use super::BinOp::*;
 
     match node {
@@ -46,67 +46,100 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  mov rsp, rbp");
             println!("  pop rbp");
             println!("  ret");
-            Ok(())
+            Ok(TyType::Void)
         }
         Node::Num(v) => {
             println!("  push {}", v);
-            Ok(())
+            Ok(TyType::Int)
         }
         Node::Ident(..) => {
-            gen_lval(node, context)?;
+            let ty = gen_lval(node, context)?;
             println!("  pop rax");
             println!("  mov rax, [rax]");
             println!("  push rax");
-            Ok(())
+            Ok(ty)
         }
         Node::Assign(lhs, rhs) => {
-            gen_lval(&lhs, context)?;
+            let ty = gen_lval(&lhs, context)?;
             gen(rhs, context)?;
             println!("  pop rdi");
             println!("  pop rax");
             println!("  mov [rax], rdi");
             println!("  push rdi");
-            Ok(())
+            Ok(ty)
         }
         Node::Bin(op, lhs, rhs) => {
-            gen(lhs, context)?;
-            gen(rhs, context)?;
+            let lty = gen(lhs, context)?;
+            let rty = gen(rhs, context)?;
 
             println!("  pop rdi");
             println!("  pop rax");
 
-            match op {
-                Add => println!("  add rax, rdi"),
-                Sub => println!("  sub rax, rdi"),
-                Mul => println!("  mul rdi"),
+            let ty = match op {
+                Add => match (lty, rty) {
+                    (TyType::Int, TyType::Int) => {
+                        println!("  add rax, rdi");
+                        Ok(TyType::Int)
+                    }
+                    (TyType::Ptr(lt), TyType::Int) => {
+                        println!("  mov rsi, rax");
+                        println!("  mov rax, {}", lt.size());
+                        println!("  mul rdi");
+                        println!("  add rax, rsi");
+                        Ok(TyType::Ptr(lt))
+                    }
+                    (TyType::Int, TyType::Ptr(lt)) => {
+                        println!("  mov rsi, rdi");
+                        println!("  mov rdi, {}", lt.size());
+                        println!("  mul rdi");
+                        println!("  add rax, rsi");
+                        Ok(TyType::Ptr(lt))
+                    }
+                    (l, r) => {
+                        Err(GenError(format!("invalid operands ( {:?} + {:?} )", l, r)).into())
+                    }
+                },
+                Sub => {
+                    println!("  sub rax, rdi");
+                    Ok(TyType::Int) // FIXME
+                }
+                Mul => {
+                    println!("  mul rdi");
+                    Ok(TyType::Int) // FIXME
+                }
                 Div => {
                     println!("  mov rdx, 0");
                     println!("  div rdi");
+                    Ok(TyType::Int) // FIXME
                 }
                 Eq => {
                     println!("  cmp rax, rdi");
                     println!("  sete al");
                     println!("  movzb rax, al");
+                    Ok(TyType::Int) // FIXME
                 }
                 Ne => {
                     println!("  cmp rax, rdi");
                     println!("  setne al");
                     println!("  movzb rax, al");
+                    Ok(TyType::Int) // FIXME
                 }
                 Le => {
                     println!("  cmp rax, rdi");
                     println!("  setle al");
                     println!("  movzb rax, al");
+                    Ok(TyType::Int) // FIXME
                 }
                 Ge => {
                     println!("  cmp rdi, rax");
                     println!("  setle al");
                     println!("  movzb rax, al");
+                    Ok(TyType::Int) // FIXME
                 }
-            }
+            };
 
             println!("  push rax");
-            Ok(())
+            ty
         }
         Node::If(cond, node_then, node_else) => {
             gen(cond, context)?;
@@ -127,7 +160,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
                     println!("{}:", else_label);
                 }
             }
-            Ok(())
+            Ok(TyType::Void)
         }
         Node::Block(nodes) => {
             for n in nodes {
@@ -136,7 +169,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             }
 
             println!("  push rax");
-            Ok(())
+            Ok(TyType::Void)
         }
         Node::Call(fname, args) => {
             if args.len() > REG_ARGS.len() {
@@ -160,7 +193,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  call {}", fname);
             println!("  add rsp,r15");
             println!("  push rax");
-            Ok(())
+            Ok(TyType::Int) // FIXME
         }
         Node::DeclFunc(fname, params, stmts) => {
             if params.len() > REG_ARGS.len() {
@@ -174,7 +207,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  sub rsp, 208"); // FIXME:
 
             for (i, p) in params.iter().enumerate() {
-                let offset = context.var_put(&p.name);
+                let offset = context.var_put(&p.name, &p.ty);
                 println!("  mov rax, rbp");
                 println!("  sub rax, {}", offset);
                 println!("  mov [rax], {}", REG_ARGS[i]);
@@ -190,25 +223,31 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  pop rbp");
             println!("  ret");
 
-            Ok(())
+            Ok(TyType::Void)
         }
-        Node::DeclVar(ident, _ty) => {
-            context.var_put(ident);
-            Ok(())
+        Node::DeclVar(ident, ty) => {
+            context.var_put(ident, &ty);
+            Ok(ty.clone())
         }
         Node::Deref(ptr) => {
-            gen(ptr, context)?;
+            let ty = gen(ptr, context)?;
             println!("  pop rax");
             println!("  mov rax, [rax]");
             println!("  push rax");
-            Ok(())
+            match ty {
+                TyType::Ptr(ty) => Ok(*ty),
+                _ => unreachable!(), // FIXME:
+            }
         }
-        Node::Addr(id) => gen_lval(id, context),
+        Node::Addr(id) => {
+            let ty = gen_lval(id, context)?;
+            Ok(TyType::Ptr(Box::new(ty)))
+        }
     }
 }
 
 struct Context<'a> {
-    var_map: VecDeque<(String, usize)>,
+    var_map: VecDeque<(String, TyType, usize)>,
     cur_offset: usize,
     label_index: usize,
     parent: Option<&'a Context<'a>>,
@@ -233,23 +272,23 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn var_put(&mut self, ident: &String) -> usize {
+    fn var_put(&mut self, ident: &String, ty: &TyType) -> usize {
         for var in self.var_map.iter() {
             if var.0 == *ident {
-                return var.1;
+                return var.2;
             }
         }
 
         self.cur_offset += 8;
         self.var_map
-            .push_front((ident.to_string(), self.cur_offset));
+            .push_front((ident.to_string(), ty.clone(), self.cur_offset));
         self.cur_offset
     }
 
-    fn var_get(&mut self, ident: &String) -> Result<usize, Error> {
+    fn var_get(&mut self, ident: &String) -> Result<(TyType, usize), Error> {
         for var in self.var_map.iter() {
             if var.0 == *ident {
-                return Ok(var.1);
+                return Ok((var.1.clone(), var.2));
             }
         }
 
