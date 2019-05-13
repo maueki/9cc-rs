@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use failure::{Error, Fail};
 
 use super::token::*;
@@ -101,18 +102,18 @@ pub struct Param {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum Node {
-    Num(i64),
-    Bin(BinOp, Box<Node>, Box<Node>),
-    Assign(Box<Node>, Box<Node>),
-    Ident(String),
+    Num(TyType, i64),
+    Bin(TyType, BinOp, Box<Node>, Box<Node>),
+    Assign(TyType, Box<Node>, Box<Node>),
+    Ident(TyType, String),
     Return(Box<Node>),
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
     Block(Vec<Node>),
-    Call(String, Vec<Node>),
+    Call(TyType, String, Vec<Node>),
     DeclFunc(String, Vec<Param>, Vec<Node>),
     DeclVar(String, TyType),
-    Addr(Box<Node>),
-    Deref(Box<Node>),
+    Addr(TyType, Box<Node>),
+    Deref(TyType, Box<Node>),
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
@@ -120,16 +121,16 @@ pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
     program(&mut context)
 }
 
-fn new_node_num(v: i64) -> Node {
-    Node::Num(v)
+fn new_node_num(ty: TyType, v: i64) -> Node {
+    Node::Num(ty, v)
 }
 
-fn new_node_bin(ty: BinOp, lhs: Node, rhs: Node) -> Node {
-    Node::Bin(ty, Box::new(lhs), Box::new(rhs))
+fn new_node_bin(ty: TyType, op: BinOp, lhs: Node, rhs: Node) -> Node {
+    Node::Bin(ty, op, Box::new(lhs), Box::new(rhs))
 }
 
-fn new_node_assign(lhs: Node, rhs: Node) -> Node {
-    Node::Assign(Box::new(lhs), Box::new(rhs))
+fn new_node_assign(ty: TyType, lhs: Node, rhs: Node) -> Node {
+    Node::Assign(ty, Box::new(lhs), Box::new(rhs))
 }
 
 fn new_node_return(lhs: Node) -> Node {
@@ -140,8 +141,8 @@ fn new_node_if(cond: Node, t: Node, e: Option<Node>) -> Node {
     Node::If(Box::new(cond), Box::new(t), e.map(Box::new))
 }
 
-fn new_node_ident(s: &str) -> Node {
-    Node::Ident(s.to_string())
+fn new_node_ident(ty: TyType, s: &str) -> Node {
+    Node::Ident(ty, s.to_string())
 }
 
 fn consume(c: char, context: &mut Context) -> Result<(), Error> {
@@ -151,7 +152,9 @@ fn consume(c: char, context: &mut Context) -> Result<(), Error> {
             Ok(())
         }
         Some((tk, pos)) => {
-            Err(ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into())
+            Err(
+                ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into(),
+            )
         }
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
@@ -185,7 +188,9 @@ fn decl_func(context: &mut Context) -> Result<Node, Error> {
         let fname = match context.pop_token() {
             Some((Token::Ident(fname), _)) => fname,
             Some((_, pos)) => {
-                return Err(ParseError("不適切な関数名です".to_owned(), *pos).into())
+                return Err(
+                    ParseError("不適切な関数名です".to_owned(), *pos).into(),
+                )
             }
             _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
         };
@@ -235,14 +240,14 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
     match context.front_token() {
         Some((Token::Return, _)) => {
             context.pop_token();
-            let node = new_node_return(assign(context)?);
+            let node = new_node_return(assign(context)?.1);
             consume(';', context)?;
             Ok(node)
         }
         Some((Token::If, _)) => {
             context.pop_token();
             consume('(', context)?;
-            let node_cond = assign(context)?;
+            let node_cond = assign(context)?.1;
             consume(')', context)?;
 
             let node_then = stmt(context)?;
@@ -268,7 +273,7 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
                 Ok(node)
             } else {
                 context.pos = pos;
-                let node = assign(context)?;
+                let node = assign(context)?.1;
                 consume(';', context)?;
                 Ok(node)
             }
@@ -282,9 +287,12 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
     if let Some((Token::Ident(var), _)) = context.pop_token() {
         let var = var.clone();
         consume(';', context)?;
+        context.vars.insert(var.clone(), t.clone());
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
-        Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
+        Err(
+            ParseError("decl_var: Unexpected Token".to_owned(), 0).into(),
+        )
     }
 }
 
@@ -311,144 +319,240 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
     Ok(tytype)
 }
 
-fn assign(context: &mut Context) -> Result<Node, Error> {
-    let mut node = equality(context)?;
+fn assign(context: &mut Context) -> Result<(TyType, Node), Error> {
+    let (lty, mut lnode) = equality(context)?;
     while let Some((Token::Sym('='), _)) = context.front_token() {
         context.pop_token();
-        node = new_node_assign(node, assign(context)?);
+        let (_rty, rnode) = assign(context)?;
+        // TODO: 型チェック
+        lnode = new_node_assign(lty.clone(), lnode, rnode);
     }
-    Ok(node)
+    Ok((lty, lnode))
 }
 
-fn equality(context: &mut Context) -> Result<Node, Error> {
-    let mut node = relational(context)?;
+fn equality(context: &mut Context) -> Result<(TyType, Node), Error> {
+    let (mut lty, mut lnode) = relational(context)?;
 
     loop {
         match context.front_token() {
             Some((Token::Op(OpType::Eq), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Eq, node, relational(context)?);
+                let (_rty, rnode) = relational(context)?;
+                // TODO: 型チェック
+                lty = TyType::Int;
+                lnode = new_node_bin(lty.clone(), BinOp::Eq, lnode, rnode);
             }
             Some((Token::Op(OpType::Ne), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Ne, node, relational(context)?);
+                let (_rty, rnode) = relational(context)?;
+                // TODO: 型チェック
+                lty = TyType::Int;
+                lnode = new_node_bin(lty.clone(), BinOp::Ne, lnode, rnode);
             }
             _ => break,
         }
     }
-    Ok(node)
+
+    Ok((lty, lnode))
 }
 
-fn relational(context: &mut Context) -> Result<Node, Error> {
-    let mut node = add(context)?;
+fn relational(context: &mut Context) -> Result<(TyType, Node), Error> {
+    let (mut lty, mut lnode) = add(context)?;
 
     loop {
         match context.front_token() {
             Some((Token::Op(OpType::Le), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Le, node, add(context)?);
+                let (_rty, rnode) = add(context)?;
+                // TODO: 型チェック
+                lty = TyType::Int;
+                lnode = new_node_bin(lty.clone(), BinOp::Le, lnode, rnode);
             }
             Some((Token::Op(OpType::Ge), _)) => {
                 context.pop_token();
-                node = new_node_bin(BinOp::Ge, node, add(context)?);
+                let (_rty, rnode) = add(context)?;
+                // TODO: 型チェック
+                lty = TyType::Int;
+                lnode = new_node_bin(lty.clone(), BinOp::Ge, lnode, rnode);
             }
             _ => break,
         }
     }
-    Ok(node)
+    Ok((lty, lnode))
 }
 
-fn add(context: &mut Context) -> Result<Node, Error> {
-    let mut node = mul(context)?;
+fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
+    let (mut lty, mut lnode) = mul(context)?;
 
     loop {
         match context.front_token() {
-            Some((Token::Sym('+'), _)) => {
+            Some((Token::Sym('+'), pos)) => {
+                let pos = pos.clone();
                 context.pop_token();
-                node = new_node_bin(BinOp::Add, node, mul(context)?);
+                let (rty, rnode) = mul(context)?;
+                lty = match (lty, rty) {
+                    (TyType::Int, TyType::Ptr(ty)) => TyType::Ptr(ty),
+                    (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
+                    (TyType::Int, TyType::Int) => TyType::Int,
+                    _ => {
+                        return Err(
+                            ParseError("加算不可能な型です".to_owned(), pos).into(),
+                        )
+                    }
+                };
+                lnode = new_node_bin(lty.clone(), BinOp::Add, lnode, rnode);
             }
-            Some((Token::Sym('-'), _)) => {
+            Some((Token::Sym('-'), pos)) => {
+                let pos = pos.clone();
                 context.pop_token();
-                node = new_node_bin(BinOp::Sub, node, mul(context)?);
+                let (rty, rnode) = mul(context)?;
+                lty = match (lty, rty) {
+                    (TyType::Int, TyType::Ptr(_ty)) => {
+                        return Err(
+                            ParseError("引算不可能な型です".to_owned(), pos).into(),
+                        )
+                    }
+                    (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
+                    (TyType::Int, TyType::Int) => TyType::Int,
+                    _ => {
+                        return Err(
+                            ParseError("引算不可能な型です".to_owned(), pos).into(),
+                        )
+                    }
+                };
+
+                lnode = new_node_bin(lty.clone(), BinOp::Sub, lnode, rnode);
             }
             _ => break,
         }
     }
 
-    Ok(node)
+    Ok((lty, lnode))
 }
 
-fn mul(context: &mut Context) -> Result<Node, Error> {
-    let mut node = unary(context)?;
+fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
+    let (lty, mut lnode) = unary(context)?;
 
     loop {
         match context.front_token() {
-            Some((Token::Sym('*'), _)) => {
+            Some((Token::Sym('*'), pos)) => {
+                let pos = pos.clone();
                 context.pop_token();
-                node = new_node_bin(BinOp::Mul, node, unary(context)?);
+                let (rty, rnode) = unary(context)?;
+                if lty != TyType::Int || rty != TyType::Int {
+                    return Err(
+                        ParseError("乗算不可能な型です".to_owned(), pos).into(),
+                    );
+                }
+                lnode = new_node_bin(lty.clone(), BinOp::Mul, lnode, rnode);
             }
-            Some((Token::Sym('/'), _)) => {
+            Some((Token::Sym('/'), pos)) => {
+                let pos = pos.clone();
                 context.pop_token();
-                node = new_node_bin(BinOp::Div, node, unary(context)?);
+                let (rty, rnode) = unary(context)?;
+                if lty != TyType::Int || rty != TyType::Int {
+                    return Err(
+                        ParseError("除算不可能な型です".to_owned(), pos).into(),
+                    );
+                }
+                lnode = new_node_bin(lty.clone(), BinOp::Div, lnode, rnode);
             }
             _ => break,
         }
     }
-    Ok(node)
+
+    Ok((lty, lnode))
 }
 
-fn unary(context: &mut Context) -> Result<Node, Error> {
+fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
     if let Ok(..) = consume('*', context) {
-        return Ok(Node::Deref(Box::new(term(context)?)));
+        let (ty, node) = term(context)?;
+        match ty {
+            TyType::Ptr(ty) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
+            t => {
+                Err(
+                    ParseError(
+                        format!("デリファレンスできない型です: {:?}", t),
+                        0, /*FIXME*/
+                    ).into(),
+                )
+            }
+        }
+    } else if let Ok(..) = consume('&', context) {
+        let (ty, node) = term(context)?;
+        Ok((
+            TyType::Ptr(Box::new(ty.clone())),
+            Node::Addr(
+                TyType::Ptr(Box::new(ty.clone())),
+                Box::new(node),
+            ),
+        ))
+    } else {
+        term(context)
     }
-
-    if let Ok(..) = consume('&', context) {
-        return Ok(Node::Addr(Box::new(term(context)?)));
-    }
-
-    term(context)
 }
 
-fn term(context: &mut Context) -> Result<Node, Error> {
+fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
     match context.front_token() {
         Some((Token::Sym('('), _)) => {
             context.pop_token();
-            let node = add(context)?;
+            let (ty, node) = add(context)?;
             match context.front_token() {
                 Some((Token::Sym(')'), _pos)) => {
                     context.pop_token();
-                    Ok(node)
+                    Ok((ty, node))
                 }
-                Some((_, pos)) => Err(ParseError(
-                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                    *pos,
-                )
-                .into()),
-                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
+                Some((_, pos)) => Err(
+                    ParseError(
+                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                        *pos,
+                    ).into(),
+                ),
+                None => Err(
+                    ParseError("想定されないEOFです".to_owned(), 0).into(),
+                ),
             }
         }
         Some((Token::Num(n), _)) => {
             let n = *n;
             context.pop_token();
-            Ok(new_node_num(n))
+            Ok((TyType::Int, new_node_num(TyType::Int, n)))
         }
-        Some((Token::Ident(id), _)) => {
+        Some((Token::Ident(id), pos)) => {
+            let pos = pos.clone();
             let id = id.clone();
             context.pop_token();
             if let Some((Token::Sym('('), _)) = context.front_token() {
                 context.pop_token();
                 let args = arguments(context)?;
                 consume(')', context)?;
-                return Ok(Node::Call(id, args));
+                return Ok((
+                    TyType::Int, /*FIXME*/
+                    Node::Call(TyType::Int /*FIXME*/, id, args),
+                ));
             }
-            Ok(new_node_ident(&id))
+
+            match context.vars.get(&id) {
+                Some(ty) => Ok((ty.clone(), new_node_ident(ty.clone(), &id))),
+                _ => {
+                    Err(
+                        ParseError(format!("宣言されていない変数です: {}", id), pos).into(),
+                    )
+                }
+            }
         }
-        Some((_, pos)) => Err(ParseError(
-            "数値でも閉じ括弧でもないトークンです".to_owned(),
-            *pos,
-        )
-        .into()),
-        _ => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
+        Some((t, pos)) => Err(
+            ParseError(
+                format!(
+                    "数値でも閉じ括弧でもないトークンです: {:?}",
+                    t
+                ),
+                *pos,
+            ).into(),
+        ),
+        _ => Err(
+            ParseError("想定されないEOFです".to_owned(), 0).into(),
+        ),
     }
 }
 
@@ -456,13 +560,13 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
     match assign(context) {
-        Ok(n) => nodes.push(n),
+        Ok((_ty, n)) => nodes.push(n),
         _ => return Ok(nodes),
     }
 
     while let Some((Token::Sym(','), _)) = context.front_token() {
         context.pop_token();
-        nodes.push(assign(context)?);
+        nodes.push(assign(context)?.1);
     }
 
     Ok(nodes)
@@ -471,11 +575,16 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
 struct Context<'a> {
     tokens: &'a Tokens,
     pos: usize,
+    vars: HashMap<String, TyType>,
 }
 
 impl<'a> Context<'a> {
     fn new(tokens: &'a Tokens) -> Self {
-        Context { tokens, pos: 0 }
+        Context {
+            tokens,
+            pos: 0,
+            vars: HashMap::new(),
+        }
     }
 
     fn pop_token(&mut self) -> Option<&(Token, usize)> {
@@ -501,8 +610,8 @@ mod test {
             let tokens = super::tokenize("1+1").unwrap();
             let mut context = Context::new(&tokens);
             assert_eq!(
-                add(&mut context).unwrap(),
-                new_node_bin(Add, Num(1), Num(1))
+                add(&mut context).unwrap().1,
+                new_node_bin(TyType::Int, Add, Num(TyType::Int, 1), Num(TyType::Int, 1))
             );
         }
 
@@ -510,8 +619,13 @@ mod test {
             let tokens = super::tokenize("(3+5)/2").unwrap();
             let mut context = Context::new(&tokens);
             assert_eq!(
-                add(&mut context).unwrap(),
-                new_node_bin(Div, new_node_bin(Add, Num(3), Num(5)), Num(2))
+                add(&mut context).unwrap().1,
+                new_node_bin(
+                    TyType::Int,
+                    Div,
+                    new_node_bin(TyType::Int, Add, Num(TyType::Int, 3), Num(TyType::Int, 5)),
+                    Num(TyType::Int, 2),
+                )
             );
         }
     }
@@ -521,13 +635,17 @@ mod test {
         let mut context = Context::new(tokens);
 
         loop {
+            if let Some((Token::Eof, _)) = context.front_token() {
+                break;
+            }
+
             match stmt(&mut context) {
                 Ok(node) => {
                     nodes.push(node);
                 }
                 Err(err) => {
                     eprintln!("{:?}", err);
-                    break;
+                    return Err(err);
                 }
             }
         }
@@ -541,86 +659,151 @@ mod test {
 
         {
             let tokens = tokenize("0;").unwrap();
-            assert_eq!(stmts(&tokens).unwrap(), vec![Node::Num(0)]);
+            assert_eq!(stmts(&tokens).unwrap(), vec![Node::Num(TyType::Int, 0)]);
         }
 
         {
-            let tokens = tokenize("a=1;b=2;a+b;").unwrap();
+            let tokens = tokenize("int a;int b;a=1;b=2;a+b;").unwrap();
             let p = stmts(&tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
                 vec![
-                    new_node_assign(new_node_ident("a"), Num(1)),
-                    new_node_assign(new_node_ident("b"), Num(2)),
-                    new_node_bin(Add, new_node_ident("a"), new_node_ident("b")),
-                ]
-            );
-        }
-
-        {
-            let tokens = tokenize("a=1;b=2;return a+b;").unwrap();
-            let p = stmts(&tokens);
-            assert_eq!(p.is_ok(), true);
-            assert_eq!(
-                p.unwrap(),
-                vec![
-                    new_node_assign(new_node_ident("a"), Num(1)),
-                    new_node_assign(new_node_ident("b"), Num(2)),
-                    new_node_return(new_node_bin(Add, new_node_ident("a"), new_node_ident("b"))),
-                ]
-            );
-        }
-
-        {
-            let tokens = tokenize("foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
-            let p = stmts(&tokens);
-            assert_eq!(p.is_ok(), true);
-            assert_eq!(
-                p.unwrap(),
-                vec![
-                    new_node_assign(new_node_ident("foo"), Num(1)),
-                    new_node_assign(new_node_ident("bar"), new_node_bin(Add, Num(2), Num(3))),
-                    new_node_return(new_node_bin(
+                    Node::DeclVar("a".to_owned(), TyType::Int),
+                    Node::DeclVar("b".to_owned(), TyType::Int),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "a"),
+                        Num(TyType::Int, 1)
+                    ),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "b"),
+                        Num(TyType::Int, 2)
+                    ),
+                    new_node_bin(
+                        TyType::Int,
                         Add,
-                        new_node_ident("foo"),
-                        new_node_ident("bar"),
-                    )),
-                ]
-            );
-        }
-
-        {
-            let tokens = tokenize("a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
-            let p = stmts(&tokens).unwrap();
-            assert_eq!(
-                p,
-                vec![
-                    new_node_assign(new_node_ident("a"), Num(1)),
-                    new_node_assign(new_node_ident("b"), Num(2)),
-                    new_node_if(
-                        new_node_bin(Eq, new_node_ident("a"), new_node_ident("b")),
-                        new_node_return(new_node_bin(
-                            Add,
-                            new_node_ident("a"),
-                            new_node_ident("b")
-                        )),
-                        Some(new_node_return(Num(0)))
+                        new_node_ident(TyType::Int, "a"),
+                        new_node_ident(TyType::Int, "b")
                     ),
                 ]
             );
         }
 
         {
-            let tokens = tokenize("foo(1,2,a);").unwrap();
+            let tokens = tokenize("int a;int b;a=1;b=2;return a+b;").unwrap();
             let p = stmts(&tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
                 p.unwrap(),
-                vec![Call(
-                    "foo".to_owned(),
-                    vec![Num(1), Num(2), new_node_ident("a")]
-                ),]
+                vec![
+                    Node::DeclVar("a".to_owned(), TyType::Int),
+                    Node::DeclVar("b".to_owned(), TyType::Int),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "a"),
+                        Num(TyType::Int, 1)
+                    ),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "b"),
+                        Num(TyType::Int, 2)
+                    ),
+                    new_node_return(new_node_bin(
+                        TyType::Int,
+                        Add,
+                        new_node_ident(TyType::Int, "a"),
+                        new_node_ident(TyType::Int, "b"),
+                    )),
+                ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int foo;int bar;foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
+            let p = stmts(&tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![
+                    Node::DeclVar("foo".to_owned(), TyType::Int),
+                    Node::DeclVar("bar".to_owned(), TyType::Int),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "foo"),
+                        Num(TyType::Int, 1)
+                    ),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "bar"),
+                        new_node_bin(TyType::Int, Add, Num(TyType::Int, 2), Num(TyType::Int, 3))
+                    ),
+                    new_node_return(new_node_bin(
+                        TyType::Int,
+                        Add,
+                        new_node_ident(TyType::Int, "foo"),
+                        new_node_ident(TyType::Int, "bar"),
+                    )),
+                ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a;int b;a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![
+                    Node::DeclVar("a".to_owned(), TyType::Int),
+                    Node::DeclVar("b".to_owned(), TyType::Int),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "a"),
+                        Num(TyType::Int, 1)
+                    ),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "b"),
+                        Num(TyType::Int, 2)
+                    ),
+                    new_node_if(
+                        new_node_bin(
+                            TyType::Int,
+                            Eq,
+                            new_node_ident(TyType::Int, "a"),
+                            new_node_ident(TyType::Int, "b"),
+                        ),
+                        new_node_return(new_node_bin(
+                            TyType::Int,
+                            Add,
+                            new_node_ident(TyType::Int, "a"),
+                            new_node_ident(TyType::Int, "b"),
+                        )),
+                        Some(new_node_return(Num(TyType::Int, 0)))
+                    ),
+                ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a;foo(1,2,a);").unwrap();
+            let p = stmts(&tokens);
+            assert_eq!(p.is_ok(), true);
+            assert_eq!(
+                p.unwrap(),
+                vec![
+                    Node::DeclVar("a".to_owned(), TyType::Int),
+                    Call(
+                        TyType::Int,
+                        "foo".to_owned(),
+                        vec![
+                            Num(TyType::Int, 1),
+                            Num(TyType::Int, 2),
+                            new_node_ident(TyType::Int, "a"),
+                        ]
+                    ),
+                ]
             );
         }
 
@@ -631,10 +814,26 @@ mod test {
                 p,
                 vec![
                     DeclVar("x".to_owned(), TyType::Int),
-                    new_node_assign(new_node_ident("x"), Num(3)),
+                    new_node_assign(
+                        TyType::Int,
+                        new_node_ident(TyType::Int, "x"),
+                        Num(TyType::Int, 3)
+                    ),
                     DeclVar("y".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
-                    new_node_assign(new_node_ident("y"), Addr(Box::new(new_node_ident("x")))),
-                    new_node_return(Deref(Box::new(new_node_ident("y")))),
+                    new_node_assign(
+                        TyType::Ptr(Box::new(TyType::Int)),
+                        new_node_ident(TyType::Ptr(Box::new(TyType::Int)), "y"),
+                        Addr(
+                            TyType::Ptr(Box::new(TyType::Int)),
+                            Box::new(new_node_ident(TyType::Int, "x")),
+                        )
+                    ),
+                    new_node_return(Deref(
+                        TyType::Int,
+                        Box::new(
+                            new_node_ident(TyType::Ptr(Box::new(TyType::Int)), "y"),
+                        ),
+                    )),
                 ]
             );
         }
@@ -648,11 +847,13 @@ mod test {
             let p = parse(&tokens);
             assert_eq!(
                 p.unwrap(),
-                vec![DeclFunc(
-                    "main".to_owned(),
-                    Vec::new(),
-                    vec![new_node_return(Num(0))]
-                ),]
+                vec![
+                    DeclFunc(
+                        "main".to_owned(),
+                        Vec::new(),
+                        vec![new_node_return(Num(TyType::Int, 0))]
+                    ),
+                ]
             );
         }
 
@@ -661,14 +862,16 @@ mod test {
             let p = parse(&tokens).unwrap();
             assert_eq!(
                 p,
-                vec![DeclFunc(
-                    "hoge".to_owned(),
-                    Vec::new(),
-                    vec![
-                        DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
-                        Return(Box::new(Num(0))),
-                    ]
-                ),]
+                vec![
+                    DeclFunc(
+                        "hoge".to_owned(),
+                        Vec::new(),
+                        vec![
+                            DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                            Return(Box::new(Num(TyType::Int, 0))),
+                        ]
+                    ),
+                ]
             );
         }
     }
