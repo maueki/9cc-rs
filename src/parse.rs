@@ -117,7 +117,7 @@ pub enum Node {
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
-    let mut context = Context::new(tokens);
+    let mut context = GlobalContext::new(tokens);
     program(&mut context)
 }
 
@@ -160,8 +160,8 @@ fn consume(c: char, context: &mut Context) -> Result<(), Error> {
 
 fn expect(token: Token, context: &mut Context) -> Result<(), Error> {
     match context.pop_token() {
-        Some((tk, _)) if *tk == token => Ok(()),
-        Some((_, pos)) => Err(ParseError("expect: Invalid Token".to_owned(), *pos).into()),
+        Some((tk, _)) if tk == token => Ok(()),
+        Some((_, pos)) => Err(ParseError("expect: Invalid Token".to_owned(), pos).into()),
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
 }
@@ -180,13 +180,15 @@ fn program(context: &mut Context) -> Result<Vec<Node>, Error> {
 }
 
 fn decl_func(context: &mut Context) -> Result<Node, Error> {
+    let context = &mut BlockContext::new(context);
+
     ty(context)?; // TODO
 
     let fname = {
         let fname = match context.pop_token() {
             Some((Token::Ident(fname), _)) => fname,
             Some((_, pos)) => {
-                return Err(ParseError("不適切な関数名です".to_owned(), *pos).into())
+                return Err(ParseError("不適切な関数名です".to_owned(), pos).into())
             }
             _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
         };
@@ -213,6 +215,7 @@ fn params(context: &mut Context) -> Result<Vec<Param>, Error> {
     while let Ok(param_type) = ty(context) {
         match context.pop_token() {
             Some((Token::Ident(pname), _)) => {
+                context.put_var(&pname.clone(), &param_type);
                 ps.push(Param {
                     ty: param_type,
                     name: pname.clone(),
@@ -255,6 +258,7 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
             Ok(new_node_if(node_cond, node_then, node_else))
         }
         Some((Token::Sym('{'), _)) => {
+            let context = &mut BlockContext::new(context);
             context.pop_token();
             let mut stmts = Vec::new();
             while let Ok(node) = stmt(context) {
@@ -264,11 +268,11 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
             Ok(Node::Block(stmts))
         }
         _ => {
-            let pos = context.pos; // FIXME:
+            let pos = context.get_pos(); // FIXME:
             if let Ok(node) = decl_var(context) {
                 Ok(node)
             } else {
-                context.pos = pos;
+                context.set_pos(pos);
                 let node = assign(context)?.1;
                 consume(';', context)?;
                 Ok(node)
@@ -283,7 +287,7 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
     if let Some((Token::Ident(var), _)) = context.pop_token() {
         let var = var.clone();
         consume(';', context)?;
-        context.vars.insert(var.clone(), t.clone());
+        context.put_var(&var.clone(), &t.clone());
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
         Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
@@ -509,7 +513,7 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
                 ));
             }
 
-            match context.vars.get(&id) {
+            match context.get_var(&id) {
                 Some(ty) => Ok((ty.clone(), new_node_ident(ty.clone(), &id))),
                 _ => Err(
                     ParseError(format!("宣言されていない変数です: {}", id), pos).into(),
@@ -544,29 +548,99 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
     Ok(nodes)
 }
 
-struct Context<'a> {
+trait Context {
+    fn pop_token(&mut self) -> Option<(Token, usize)>;
+    fn front_token(&self) -> Option<&(Token, usize)>;
+    fn set_pos(&mut self, pos: usize);
+    fn get_pos(&self) -> usize;
+    fn get_var(&self, id: &str) -> Option<&TyType>;
+    fn put_var(&mut self, id: &str, ty: &TyType);
+}
+
+struct GlobalContext<'a> {
     tokens: &'a Tokens,
     pos: usize,
     vars: HashMap<String, TyType>,
 }
 
-impl<'a> Context<'a> {
+impl<'a> GlobalContext<'a> {
     fn new(tokens: &'a Tokens) -> Self {
-        Context {
+        Self {
             tokens,
             pos: 0,
             vars: HashMap::new(),
         }
     }
+}
 
-    fn pop_token(&mut self) -> Option<&(Token, usize)> {
+impl<'a> Context for GlobalContext<'a> {
+    fn pop_token(&mut self) -> Option<(Token, usize)> {
         let token = self.tokens.get(self.pos);
         self.pos += 1;
-        token
+        token.map(|c| c.clone())
     }
 
     fn front_token(&self) -> Option<&(Token, usize)> {
         self.tokens.get(self.pos)
+    }
+
+    fn set_pos(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    fn get_pos(&self) -> usize {
+        self.pos
+    }
+
+    fn get_var(&self, id: &str) -> Option<&TyType> {
+        self.vars.get(id)
+    }
+
+    fn put_var(&mut self, id: &str, ty: &TyType) {
+        self.vars.insert(id.to_string(), ty.clone());
+    }
+}
+
+struct BlockContext<'a> {
+    parent: &'a mut Context,
+    vars: HashMap<String, TyType>,
+}
+
+impl<'a> BlockContext<'a> {
+    fn new(parent: &'a mut Context) -> Self {
+        BlockContext {
+            parent,
+            vars: HashMap::new(),
+        }
+    }
+}
+
+impl<'a> Context for BlockContext<'a> {
+    fn pop_token(&mut self) -> Option<(Token, usize)> {
+        self.parent.pop_token()
+    }
+
+    fn front_token(&self) -> Option<&(Token, usize)> {
+        self.parent.front_token()
+    }
+
+    fn set_pos(&mut self, pos: usize) {
+        self.parent.set_pos(pos);
+    }
+
+    fn get_pos(&self) -> usize {
+        self.parent.get_pos()
+    }
+
+    fn get_var(&self, id: &str) -> Option<&TyType> {
+        match self.vars.get(id) {
+            t @ Some(..) => t,
+            _ => self.parent.get_var(id),
+        }
+    }
+
+    fn put_var(&mut self, id: &str, ty: &TyType) {
+        self.vars.insert(id.to_string(), ty.clone());
     }
 }
 
@@ -580,7 +654,7 @@ mod test {
         use super::Node::*;
         {
             let tokens = super::tokenize("1+1").unwrap();
-            let mut context = Context::new(&tokens);
+            let mut context = GlobalContext::new(&tokens);
             assert_eq!(
                 add(&mut context).unwrap().1,
                 new_node_bin(TyType::Int, Add, Num(TyType::Int, 1), Num(TyType::Int, 1))
@@ -589,7 +663,7 @@ mod test {
 
         {
             let tokens = super::tokenize("(3+5)/2").unwrap();
-            let mut context = Context::new(&tokens);
+            let mut context = GlobalContext::new(&tokens);
             assert_eq!(
                 add(&mut context).unwrap().1,
                 new_node_bin(
@@ -604,7 +678,7 @@ mod test {
 
     fn stmts(tokens: &Tokens) -> Result<Vec<Node>, Error> {
         let mut nodes = Vec::new();
-        let mut context = Context::new(tokens);
+        let mut context = GlobalContext::new(tokens);
 
         loop {
             if let Some((Token::Eof, _)) = context.front_token() {
