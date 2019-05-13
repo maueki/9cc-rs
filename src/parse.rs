@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use failure::{Error, Fail};
+use std::collections::HashMap;
 
 use super::token::*;
 
@@ -152,9 +152,7 @@ fn consume(c: char, context: &mut Context) -> Result<(), Error> {
             Ok(())
         }
         Some((tk, pos)) => {
-            Err(
-                ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into(),
-            )
+            Err(ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into())
         }
         None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
     }
@@ -188,9 +186,7 @@ fn decl_func(context: &mut Context) -> Result<Node, Error> {
         let fname = match context.pop_token() {
             Some((Token::Ident(fname), _)) => fname,
             Some((_, pos)) => {
-                return Err(
-                    ParseError("不適切な関数名です".to_owned(), *pos).into(),
-                )
+                return Err(ParseError("不適切な関数名です".to_owned(), *pos).into())
             }
             _ => return Err(ParseError("想定しないEOFです".to_owned(), 0).into()),
         };
@@ -290,9 +286,7 @@ fn decl_var(context: &mut Context) -> Result<Node, Error> {
         context.vars.insert(var.clone(), t.clone());
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
-        Err(
-            ParseError("decl_var: Unexpected Token".to_owned(), 0).into(),
-        )
+        Err(ParseError("decl_var: Unexpected Token".to_owned(), 0).into())
     }
 }
 
@@ -395,9 +389,7 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
                     (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
                     (TyType::Int, TyType::Int) => TyType::Int,
                     _ => {
-                        return Err(
-                            ParseError("加算不可能な型です".to_owned(), pos).into(),
-                        )
+                        return Err(ParseError("加算不可能な型です".to_owned(), pos).into())
                     }
                 };
                 lnode = new_node_bin(lty.clone(), BinOp::Add, lnode, rnode);
@@ -408,16 +400,12 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
                 let (rty, rnode) = mul(context)?;
                 lty = match (lty, rty) {
                     (TyType::Int, TyType::Ptr(_ty)) => {
-                        return Err(
-                            ParseError("引算不可能な型です".to_owned(), pos).into(),
-                        )
+                        return Err(ParseError("引算不可能な型です".to_owned(), pos).into())
                     }
                     (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
                     (TyType::Int, TyType::Int) => TyType::Int,
                     _ => {
-                        return Err(
-                            ParseError("引算不可能な型です".to_owned(), pos).into(),
-                        )
+                        return Err(ParseError("引算不可能な型です".to_owned(), pos).into())
                     }
                 };
 
@@ -440,9 +428,7 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
                 if lty != TyType::Int || rty != TyType::Int {
-                    return Err(
-                        ParseError("乗算不可能な型です".to_owned(), pos).into(),
-                    );
+                    return Err(ParseError("乗算不可能な型です".to_owned(), pos).into());
                 }
                 lnode = new_node_bin(lty.clone(), BinOp::Mul, lnode, rnode);
             }
@@ -451,9 +437,7 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
                 if lty != TyType::Int || rty != TyType::Int {
-                    return Err(
-                        ParseError("除算不可能な型です".to_owned(), pos).into(),
-                    );
+                    return Err(ParseError("除算不可能な型です".to_owned(), pos).into());
                 }
                 lnode = new_node_bin(lty.clone(), BinOp::Div, lnode, rnode);
             }
@@ -470,22 +454,18 @@ fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
         match ty {
             TyType::Ptr(ty) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
             t => {
-                Err(
-                    ParseError(
-                        format!("デリファレンスできない型です: {:?}", t),
-                        0, /*FIXME*/
-                    ).into(),
+                Err(ParseError(
+                    format!("デリファレンスできない型です: {:?}", t),
+                    0, /*FIXME*/
                 )
+                .into())
             }
         }
     } else if let Ok(..) = consume('&', context) {
         let (ty, node) = term(context)?;
         Ok((
             TyType::Ptr(Box::new(ty.clone())),
-            Node::Addr(
-                TyType::Ptr(Box::new(ty.clone())),
-                Box::new(node),
-            ),
+            Node::Addr(TyType::Ptr(Box::new(ty.clone())), Box::new(node)),
         ))
     } else {
         term(context)
@@ -502,15 +482,12 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
                     context.pop_token();
                     Ok((ty, node))
                 }
-                Some((_, pos)) => Err(
-                    ParseError(
-                        "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                        *pos,
-                    ).into(),
-                ),
-                None => Err(
-                    ParseError("想定されないEOFです".to_owned(), 0).into(),
-                ),
+                Some((_, pos)) => Err(ParseError(
+                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
+                    *pos,
+                )
+                .into()),
+                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
             }
         }
         Some((Token::Num(n), _)) => {
@@ -534,25 +511,20 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
 
             match context.vars.get(&id) {
                 Some(ty) => Ok((ty.clone(), new_node_ident(ty.clone(), &id))),
-                _ => {
-                    Err(
-                        ParseError(format!("宣言されていない変数です: {}", id), pos).into(),
-                    )
-                }
+                _ => Err(
+                    ParseError(format!("宣言されていない変数です: {}", id), pos).into(),
+                ),
             }
         }
-        Some((t, pos)) => Err(
-            ParseError(
-                format!(
-                    "数値でも閉じ括弧でもないトークンです: {:?}",
-                    t
-                ),
-                *pos,
-            ).into(),
-        ),
-        _ => Err(
-            ParseError("想定されないEOFです".to_owned(), 0).into(),
-        ),
+        Some((t, pos)) => Err(ParseError(
+            format!(
+                "数値でも閉じ括弧でもないトークンです: {:?}",
+                t
+            ),
+            *pos,
+        )
+        .into()),
+        _ => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
     }
 }
 
@@ -721,7 +693,8 @@ mod test {
         }
 
         {
-            let tokens = tokenize("int foo;int bar;foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
+            let tokens =
+                tokenize("int foo;int bar;foo = 1;\nbar = 2 + 3;\nreturn foo + bar;").unwrap();
             let p = stmts(&tokens);
             assert_eq!(p.is_ok(), true);
             assert_eq!(
@@ -750,7 +723,8 @@ mod test {
         }
 
         {
-            let tokens = tokenize("int a;int b;a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
+            let tokens =
+                tokenize("int a;int b;a=1;b=2;if (a== b) return a+b;else return 0;").unwrap();
             let p = stmts(&tokens).unwrap();
             assert_eq!(
                 p,
@@ -830,9 +804,7 @@ mod test {
                     ),
                     new_node_return(Deref(
                         TyType::Int,
-                        Box::new(
-                            new_node_ident(TyType::Ptr(Box::new(TyType::Int)), "y"),
-                        ),
+                        Box::new(new_node_ident(TyType::Ptr(Box::new(TyType::Int)), "y"),),
                     )),
                 ]
             );
@@ -847,13 +819,11 @@ mod test {
             let p = parse(&tokens);
             assert_eq!(
                 p.unwrap(),
-                vec![
-                    DeclFunc(
-                        "main".to_owned(),
-                        Vec::new(),
-                        vec![new_node_return(Num(TyType::Int, 0))]
-                    ),
-                ]
+                vec![DeclFunc(
+                    "main".to_owned(),
+                    Vec::new(),
+                    vec![new_node_return(Num(TyType::Int, 0))]
+                ),]
             );
         }
 
@@ -862,16 +832,14 @@ mod test {
             let p = parse(&tokens).unwrap();
             assert_eq!(
                 p,
-                vec![
-                    DeclFunc(
-                        "hoge".to_owned(),
-                        Vec::new(),
-                        vec![
-                            DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
-                            Return(Box::new(Num(TyType::Int, 0))),
-                        ]
-                    ),
-                ]
+                vec![DeclFunc(
+                    "hoge".to_owned(),
+                    Vec::new(),
+                    vec![
+                        DeclVar("a".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                        Return(Box::new(Num(TyType::Int, 0))),
+                    ]
+                ),]
             );
         }
     }
