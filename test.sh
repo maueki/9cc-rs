@@ -35,5 +35,6 @@ try 3  "int main() {int x; x=3; int *y; y=&x; return *y;}"
 try 4  "int main() {int x; x=3; int *y; y=&x; *y=4; return x;}"
 try 8  "int main() {int *p; alloc4(&p, 1, 2, 4, 8); int *q; q = p + 3; return *q;}"
 #TODO: to improve gen.rs# try 1  "int main() { int a; a=1; { int a; a=2;} return a;}"
+try 12 "int main() { int a; int* b; return sizeof a + sizeof b;}"
 
 echo OK

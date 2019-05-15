@@ -9,6 +9,14 @@ lazy_static! {
     pub static ref REG_ARGS: Vec<&'static str> = { vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"] };
 }
 
+fn sizeof(ty: &TyType) -> usize {
+    match ty {
+        TyType::Int => 4,
+        TyType::Ptr(..) => 8,
+        _ => unreachable!(),
+    }
+}
+
 #[derive(Fail, Debug)]
 #[fail(display = "Gen Error: {}", _0)]
 pub struct GenError(String);
@@ -83,14 +91,14 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
                     }
                     (TyType::Ptr(lt), TyType::Int) => {
                         println!("  mov rsi, rax");
-                        println!("  mov rax, {}", lt.size());
+                        println!("  mov rax, {}", sizeof(&lt));
                         println!("  mul rdi");
                         println!("  add rax, rsi");
                         Ok(TyType::Ptr(lt))
                     }
                     (TyType::Int, TyType::Ptr(lt)) => {
                         println!("  mov rsi, rdi");
-                        println!("  mov rdi, {}", lt.size());
+                        println!("  mov rdi, {}", sizeof(&lt));
                         println!("  mul rdi");
                         println!("  add rax, rsi");
                         Ok(TyType::Ptr(lt))
@@ -243,8 +251,9 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             let ty = gen_lval(id, context)?;
             Ok(TyType::Ptr(Box::new(ty)))
         }
-        Node::Sizeof(_ty) => {
-            // TODO:
+        Node::Sizeof(ty) => {
+            println!("  mov rax, {}", sizeof(&ty));
+            println!("  push rax");
             Ok(TyType::Int)
         }
     }

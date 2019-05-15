@@ -85,16 +85,6 @@ pub enum TyType {
     Void,
 }
 
-impl TyType {
-    pub fn size(&self) -> usize {
-        match self {
-            TyType::Int => 4,
-            TyType::Ptr(..) => 8,
-            _ => unreachable!(),
-        }
-    }
-}
-
 #[derive(PartialEq, Eq, Debug)]
 pub struct Param {
     pub ty: TyType,
