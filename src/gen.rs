@@ -243,6 +243,10 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             let ty = gen_lval(id, context)?;
             Ok(TyType::Ptr(Box::new(ty)))
         }
+        Node::Sizeof(_ty) => {
+            // TODO:
+            Ok(TyType::Int)
+        }
     }
 }
 

@@ -67,8 +67,9 @@ pub enum BinOp {
 /// mul: mul "/" unary
 ///
 /// unary: term
-/// unary: "+" term
-/// unary: "-" term
+/// unary: "*" term
+/// unary: "&" term
+/// unary: sizeof term
 ///
 /// term: ident "(" [arguments] ")"
 /// term: num
@@ -114,6 +115,7 @@ pub enum Node {
     DeclVar(String, TyType),
     Addr(TyType, Box<Node>),
     Deref(TyType, Box<Node>),
+    Sizeof(TyType),
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
@@ -471,6 +473,10 @@ fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
             TyType::Ptr(Box::new(ty.clone())),
             Node::Addr(TyType::Ptr(Box::new(ty.clone())), Box::new(node)),
         ))
+    } else if let Some((Token::Sizeof, _)) = context.front_token() {
+        context.pop_token();
+        let (ty, _) = unary(context)?;
+        Ok((TyType::Int, Node::Sizeof(ty)))
     } else {
         term(context)
     }
@@ -881,6 +887,15 @@ mod test {
                         Box::new(new_node_ident(TyType::Ptr(Box::new(TyType::Int)), "y"),),
                     )),
                 ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a; sizeof a;").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![DeclVar("a".to_owned(), TyType::Int), Sizeof(TyType::Int)]
             );
         }
     }
