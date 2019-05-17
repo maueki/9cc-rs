@@ -139,7 +139,7 @@ fn new_node_ident(ty: TyType, s: &str) -> Node {
 
 fn consume(c: char, context: &mut Context) -> Result<(), Error> {
     match context.front_token() {
-        Some((Token::Sym(sym), _)) if *sym == c => {
+        Some((Token::Char(sym), _)) if *sym == c => {
             context.pop_token();
             Ok(())
         }
@@ -217,7 +217,7 @@ fn params(context: &mut Context) -> Result<Vec<Param>, Error> {
         }
 
         match context.front_token() {
-            Some((Token::Sym(','), _)) => {
+            Some((Token::Char(','), _)) => {
                 context.pop_token();
             }
             _ => break,
@@ -249,7 +249,7 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
 
             Ok(new_node_if(node_cond, node_then, node_else))
         }
-        Some((Token::Sym('{'), _)) => {
+        Some((Token::Char('{'), _)) => {
             let context = &mut BlockContext::new(context);
             context.pop_token();
             let mut stmts = Vec::new();
@@ -301,7 +301,7 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
 
     context.pop_token();
 
-    while let Some((Token::Sym('*'), _)) = context.front_token() {
+    while let Some((Token::Char('*'), _)) = context.front_token() {
         context.pop_token();
         tytype = TyType::Ptr(Box::new(tytype));
     }
@@ -311,7 +311,7 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
 
 fn assign(context: &mut Context) -> Result<(TyType, Node), Error> {
     let (lty, mut lnode) = equality(context)?;
-    while let Some((Token::Sym('='), _)) = context.front_token() {
+    while let Some((Token::Char('='), _)) = context.front_token() {
         context.pop_token();
         let (_rty, rnode) = assign(context)?;
         // TODO: 型チェック
@@ -376,7 +376,7 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
 
     loop {
         match context.front_token() {
-            Some((Token::Sym('+'), pos)) => {
+            Some((Token::Char('+'), pos)) => {
                 let pos = pos.clone();
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
@@ -390,7 +390,7 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
                 };
                 lnode = new_node_bin(lty.clone(), BinOp::Add, lnode, rnode);
             }
-            Some((Token::Sym('-'), pos)) => {
+            Some((Token::Char('-'), pos)) => {
                 let pos = pos.clone();
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
@@ -419,7 +419,7 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
 
     loop {
         match context.front_token() {
-            Some((Token::Sym('*'), pos)) => {
+            Some((Token::Char('*'), pos)) => {
                 let pos = pos.clone();
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
@@ -428,7 +428,7 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
                 }
                 lnode = new_node_bin(lty.clone(), BinOp::Mul, lnode, rnode);
             }
-            Some((Token::Sym('/'), pos)) => {
+            Some((Token::Char('/'), pos)) => {
                 let pos = pos.clone();
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
@@ -474,11 +474,11 @@ fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
 
 fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
     match context.front_token() {
-        Some((Token::Sym('('), _)) => {
+        Some((Token::Char('('), _)) => {
             context.pop_token();
             let (ty, node) = add(context)?;
             match context.front_token() {
-                Some((Token::Sym(')'), _pos)) => {
+                Some((Token::Char(')'), _pos)) => {
                     context.pop_token();
                     Ok((ty, node))
                 }
@@ -499,7 +499,7 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
             let pos = pos.clone();
             let id = id.clone();
             context.pop_token();
-            if let Some((Token::Sym('('), _)) = context.front_token() {
+            if let Some((Token::Char('('), _)) = context.front_token() {
                 context.pop_token();
                 let args = arguments(context)?;
                 consume(')', context)?;
@@ -536,7 +536,7 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
         _ => return Ok(nodes),
     }
 
-    while let Some((Token::Sym(','), _)) = context.front_token() {
+    while let Some((Token::Char(','), _)) = context.front_token() {
         context.pop_token();
         nodes.push(assign(context)?.1);
     }
