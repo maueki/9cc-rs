@@ -47,7 +47,7 @@ trait Consume<T> {
 ///
 /// ifclause: "if" "(" assign ")" stmt ["else" stmt]
 ///
-/// decl_var: type ident ";"
+/// decl_var: type ident ["[" num "]"] ";"
 ///
 /// assign: equality
 /// assign: equality "=" assign
@@ -87,6 +87,7 @@ pub enum TyType {
     Int,
     Ptr(Box<TyType>),
     Void,
+    Array(Box<TyType>, usize),
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -255,10 +256,21 @@ fn stmt<T: Context>(context: &mut T) -> Result<Node, Error> {
 }
 
 fn decl_var<T: Context>(context: &mut T) -> Result<Node, Error> {
-    let t = ty(context)?;
+    let mut t = ty(context)?;
 
     if let Some((Token::Ident(var), _)) = context.pop_token() {
         let var = var.clone();
+
+        // TODO: 数値なし(int a[])や多重配列は未実装
+        if context.consume('[').is_ok() {
+            if let Some((Token::Num(n), _)) = context.front_token() {
+                t = TyType::Array(Box::new(t), *n as usize);
+                context.pop_token();
+            } else {
+                unimplemented!();
+            }
+            context.consume(']')?;
+        }
         context.consume(';')?;
         context.put_var(&var.clone(), &t.clone());
         Ok(Node::DeclVar(var.to_string(), t))
@@ -876,6 +888,18 @@ mod test {
             assert_eq!(
                 p,
                 vec![DeclVar("a".to_owned(), TyType::Int), Sizeof(TyType::Int)]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a[10];").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![DeclVar(
+                    "a".to_owned(),
+                    TyType::Array(Box::new(TyType::Int), 10)
+                )]
             );
         }
     }
