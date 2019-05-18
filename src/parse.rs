@@ -19,6 +19,10 @@ pub enum BinOp {
     Ge,
 }
 
+trait Consume<T> {
+    fn consume(&mut self, tk: T) -> Result<(), Error>;
+}
+
 /// parser syntax
 ///
 /// program: decl_func program
@@ -137,28 +141,7 @@ fn new_node_ident(ty: TyType, s: &str) -> Node {
     Node::Ident(ty, s.to_string())
 }
 
-fn consume(c: char, context: &mut Context) -> Result<(), Error> {
-    match context.front_token() {
-        Some((Token::Char(sym), _)) if *sym == c => {
-            context.pop_token();
-            Ok(())
-        }
-        Some((tk, pos)) => {
-            Err(ParseError(format!("consume: expect {:?}, but {:?}", c, *tk), *pos).into())
-        }
-        None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
-    }
-}
-
-fn expect(token: Token, context: &mut Context) -> Result<(), Error> {
-    match context.pop_token() {
-        Some((tk, _)) if tk == token => Ok(()),
-        Some((_, pos)) => Err(ParseError("expect: Invalid Token".to_owned(), pos).into()),
-        None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
-    }
-}
-
-fn program(context: &mut Context) -> Result<Vec<Node>, Error> {
+fn program<T: Context>(context: &mut T) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
     loop {
@@ -171,7 +154,7 @@ fn program(context: &mut Context) -> Result<Vec<Node>, Error> {
     Ok(nodes)
 }
 
-fn decl_func(context: &mut Context) -> Result<Node, Error> {
+fn decl_func<T: Context>(context: &mut T) -> Result<Node, Error> {
     let context = &mut BlockContext::new(context);
 
     ty(context)?; // TODO
@@ -187,21 +170,21 @@ fn decl_func(context: &mut Context) -> Result<Node, Error> {
         fname.clone()
     };
 
-    consume('(', context)?;
+    context.consume('(')?;
     let ps = params(context)?;
-    consume(')', context)?;
+    context.consume(')')?;
 
-    consume('{', context)?;
+    context.consume('{')?;
     let mut nodes = Vec::new();
     while let Ok(node) = stmt(context) {
         nodes.push(node);
     }
-    consume('}', context)?;
+    context.consume('}')?;
 
     Ok(Node::DeclFunc(fname.clone(), ps, nodes))
 }
 
-fn params(context: &mut Context) -> Result<Vec<Param>, Error> {
+fn params<T: Context>(context: &mut T) -> Result<Vec<Param>, Error> {
     let mut ps = Vec::new();
 
     while let Ok(param_type) = ty(context) {
@@ -216,35 +199,33 @@ fn params(context: &mut Context) -> Result<Vec<Param>, Error> {
             _ => return Err(ParseError("params: Unexpected Token".to_owned(), 0).into()),
         }
 
-        match context.front_token() {
-            Some((Token::Char(','), _)) => {
-                context.pop_token();
-            }
-            _ => break,
+        if context.consume(',').is_err() {
+            break;
         }
     }
 
     Ok(ps)
 }
 
-fn stmt(context: &mut Context) -> Result<Node, Error> {
+fn stmt<T: Context>(context: &mut T) -> Result<Node, Error> {
     match context.front_token() {
         Some((Token::Return, _)) => {
             context.pop_token();
             let node = new_node_return(assign(context)?.1);
-            consume(';', context)?;
+            context.consume(';')?;
             Ok(node)
         }
         Some((Token::If, _)) => {
             context.pop_token();
-            consume('(', context)?;
+            context.consume('(')?;
             let node_cond = assign(context)?.1;
-            consume(')', context)?;
+            context.consume(')')?;
 
             let node_then = stmt(context)?;
-            let node_else = match expect(Token::Else, context) {
-                Ok(()) => Some(stmt(context)?),
-                _ => None,
+            let node_else = if let Ok(..) = context.consume(&Token::Else) {
+                Some(stmt(context)?)
+            } else {
+                None
             };
 
             Ok(new_node_if(node_cond, node_then, node_else))
@@ -256,7 +237,7 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
             while let Ok(node) = stmt(context) {
                 stmts.push(node);
             }
-            consume('}', context)?;
+            context.consume('}')?;
             Ok(Node::Block(stmts))
         }
         _ => {
@@ -266,19 +247,19 @@ fn stmt(context: &mut Context) -> Result<Node, Error> {
             } else {
                 context.set_pos(pos);
                 let node = assign(context)?.1;
-                consume(';', context)?;
+                context.consume(';')?;
                 Ok(node)
             }
         }
     }
 }
 
-fn decl_var(context: &mut Context) -> Result<Node, Error> {
+fn decl_var<T: Context>(context: &mut T) -> Result<Node, Error> {
     let t = ty(context)?;
 
     if let Some((Token::Ident(var), _)) = context.pop_token() {
         let var = var.clone();
-        consume(';', context)?;
+        context.consume(';')?;
         context.put_var(&var.clone(), &t.clone());
         Ok(Node::DeclVar(var.to_string(), t))
     } else {
@@ -293,7 +274,7 @@ fn str2ty(s: &str) -> Result<TyType, Error> {
     }
 }
 
-fn ty(context: &mut Context) -> Result<TyType, Error> {
+fn ty<T: Context>(context: &mut T) -> Result<TyType, Error> {
     let mut tytype = match context.front_token() {
         Some((Token::Ident(tname), _)) => str2ty(tname)?,
         _ => return Err(ParseError("ty: Unexpected Token".to_owned(), 0).into()),
@@ -309,10 +290,9 @@ fn ty(context: &mut Context) -> Result<TyType, Error> {
     Ok(tytype)
 }
 
-fn assign(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn assign<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     let (lty, mut lnode) = equality(context)?;
-    while let Some((Token::Char('='), _)) = context.front_token() {
-        context.pop_token();
+    while context.consume('=').is_ok() {
         let (_rty, rnode) = assign(context)?;
         // TODO: 型チェック
         lnode = new_node_assign(lty.clone(), lnode, rnode);
@@ -320,64 +300,56 @@ fn assign(context: &mut Context) -> Result<(TyType, Node), Error> {
     Ok((lty, lnode))
 }
 
-fn equality(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn equality<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     let (mut lty, mut lnode) = relational(context)?;
 
     loop {
-        match context.front_token() {
-            Some((Token::Op(OpType::Eq), _)) => {
-                context.pop_token();
-                let (_rty, rnode) = relational(context)?;
-                // TODO: 型チェック
-                lty = TyType::Int;
-                lnode = new_node_bin(lty.clone(), BinOp::Eq, lnode, rnode);
-            }
-            Some((Token::Op(OpType::Ne), _)) => {
-                context.pop_token();
-                let (_rty, rnode) = relational(context)?;
-                // TODO: 型チェック
-                lty = TyType::Int;
-                lnode = new_node_bin(lty.clone(), BinOp::Ne, lnode, rnode);
-            }
-            _ => break,
+        if context.consume(&Token::Eq).is_ok() {
+            let (_rty, rnode) = relational(context)?;
+            // TODO: 型チェック
+            lty = TyType::Int;
+            lnode = new_node_bin(lty.clone(), BinOp::Eq, lnode, rnode);
+        } else if context.consume(&Token::Ne).is_ok() {
+            let (_rty, rnode) = relational(context)?;
+            // TODO: 型チェック
+            lty = TyType::Int;
+            lnode = new_node_bin(lty.clone(), BinOp::Ne, lnode, rnode);
+        } else {
+            break;
         }
     }
 
     Ok((lty, lnode))
 }
 
-fn relational(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn relational<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     let (mut lty, mut lnode) = add(context)?;
 
     loop {
-        match context.front_token() {
-            Some((Token::Op(OpType::Le), _)) => {
-                context.pop_token();
-                let (_rty, rnode) = add(context)?;
-                // TODO: 型チェック
-                lty = TyType::Int;
-                lnode = new_node_bin(lty.clone(), BinOp::Le, lnode, rnode);
-            }
-            Some((Token::Op(OpType::Ge), _)) => {
-                context.pop_token();
-                let (_rty, rnode) = add(context)?;
-                // TODO: 型チェック
-                lty = TyType::Int;
-                lnode = new_node_bin(lty.clone(), BinOp::Ge, lnode, rnode);
-            }
-            _ => break,
+        if context.consume(&Token::Le).is_ok() {
+            let (_rty, rnode) = add(context)?;
+            // TODO: 型チェック
+            lty = TyType::Int;
+            lnode = new_node_bin(lty.clone(), BinOp::Le, lnode, rnode);
+        } else if context.consume(&Token::Ge).is_ok() {
+            let (_rty, rnode) = add(context)?;
+            // TODO: 型チェック
+            lty = TyType::Int;
+            lnode = new_node_bin(lty.clone(), BinOp::Ge, lnode, rnode);
+        } else {
+            break;
         }
     }
     Ok((lty, lnode))
 }
 
-fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn add<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     let (mut lty, mut lnode) = mul(context)?;
 
     loop {
         match context.front_token() {
             Some((Token::Char('+'), pos)) => {
-                let pos = pos.clone();
+                let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
                 lty = match (lty, rty) {
@@ -391,7 +363,7 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
                 lnode = new_node_bin(lty.clone(), BinOp::Add, lnode, rnode);
             }
             Some((Token::Char('-'), pos)) => {
-                let pos = pos.clone();
+                let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
                 lty = match (lty, rty) {
@@ -414,13 +386,13 @@ fn add(context: &mut Context) -> Result<(TyType, Node), Error> {
     Ok((lty, lnode))
 }
 
-fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn mul<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     let (lty, mut lnode) = unary(context)?;
 
     loop {
         match context.front_token() {
             Some((Token::Char('*'), pos)) => {
-                let pos = pos.clone();
+                let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
                 if lty != TyType::Int || rty != TyType::Int {
@@ -429,7 +401,7 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
                 lnode = new_node_bin(lty.clone(), BinOp::Mul, lnode, rnode);
             }
             Some((Token::Char('/'), pos)) => {
-                let pos = pos.clone();
+                let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = unary(context)?;
                 if lty != TyType::Int || rty != TyType::Int {
@@ -444,8 +416,8 @@ fn mul(context: &mut Context) -> Result<(TyType, Node), Error> {
     Ok((lty, lnode))
 }
 
-fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
-    if let Ok(..) = consume('*', context) {
+fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
+    if let Ok(..) = context.consume('*') {
         let (ty, node) = term(context)?;
         match ty {
             TyType::Ptr(ty) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
@@ -457,7 +429,7 @@ fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
                 .into())
             }
         }
-    } else if let Ok(..) = consume('&', context) {
+    } else if let Ok(..) = context.consume('&') {
         let (ty, node) = term(context)?;
         Ok((
             TyType::Ptr(Box::new(ty.clone())),
@@ -472,23 +444,13 @@ fn unary(context: &mut Context) -> Result<(TyType, Node), Error> {
     }
 }
 
-fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
+fn term<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     match context.front_token() {
         Some((Token::Char('('), _)) => {
             context.pop_token();
             let (ty, node) = add(context)?;
-            match context.front_token() {
-                Some((Token::Char(')'), _pos)) => {
-                    context.pop_token();
-                    Ok((ty, node))
-                }
-                Some((_, pos)) => Err(ParseError(
-                    "開き括弧に対応する閉じ括弧がありません".to_owned(),
-                    *pos,
-                )
-                .into()),
-                None => Err(ParseError("想定されないEOFです".to_owned(), 0).into()),
-            }
+            context.consume(')')?;
+            Ok((ty, node))
         }
         Some((Token::Num(n), _)) => {
             let n = *n;
@@ -496,13 +458,13 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
             Ok((TyType::Int, new_node_num(TyType::Int, n)))
         }
         Some((Token::Ident(id), pos)) => {
-            let pos = pos.clone();
+            let pos = *pos;
             let id = id.clone();
             context.pop_token();
             if let Some((Token::Char('('), _)) = context.front_token() {
                 context.pop_token();
                 let args = arguments(context)?;
-                consume(')', context)?;
+                context.consume(')')?;
                 return Ok((
                     TyType::Int, /*FIXME*/
                     Node::Call(TyType::Int /*FIXME*/, id, args),
@@ -528,7 +490,7 @@ fn term(context: &mut Context) -> Result<(TyType, Node), Error> {
     }
 }
 
-fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
+fn arguments<T: Context>(context: &mut T) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
     match assign(context) {
@@ -536,8 +498,7 @@ fn arguments(context: &mut Context) -> Result<Vec<Node>, Error> {
         _ => return Ok(nodes),
     }
 
-    while let Some((Token::Char(','), _)) = context.front_token() {
-        context.pop_token();
+    while context.consume(',').is_ok() {
         nodes.push(assign(context)?.1);
     }
 
@@ -573,7 +534,7 @@ impl<'a> Context for GlobalContext<'a> {
     fn pop_token(&mut self) -> Option<(Token, usize)> {
         let token = self.tokens.get(self.pos);
         self.pos += 1;
-        token.map(|c| c.clone())
+        token.cloned()
     }
 
     fn front_token(&self) -> Option<&(Token, usize)> {
@@ -637,6 +598,35 @@ impl<'a> Context for BlockContext<'a> {
 
     fn put_var(&mut self, id: &str, ty: &TyType) {
         self.vars.insert(id.to_string(), ty.clone());
+    }
+}
+
+impl<T> Consume<&Token> for T
+where
+    T: Context,
+{
+    fn consume(&mut self, token: &Token) -> Result<(), Error> {
+        match self.front_token() {
+            Some((tk, _pos)) if tk == token => {
+                self.pop_token();
+                Ok(())
+            }
+            Some((tk, pos)) => Err(ParseError(
+                format!("consume: expect {:?}, but {:?}", token, tk.clone()),
+                *pos,
+            )
+            .into()),
+            None => Err(ParseError("Invalid Eof".to_owned(), 0).into()),
+        }
+    }
+}
+
+impl<T> Consume<char> for T
+where
+    T: Context,
+{
+    fn consume(&mut self, c: char) -> Result<(), Error> {
+        self.consume(&Token::Char(c))
     }
 }
 

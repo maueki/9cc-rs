@@ -285,7 +285,7 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn var_put(&mut self, ident: &String, ty: &TyType) -> usize {
+    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize {
         for var in self.var_map.iter() {
             if var.0 == *ident {
                 return var.2;
@@ -298,7 +298,7 @@ impl<'a> Context<'a> {
         self.cur_offset
     }
 
-    fn var_get(&mut self, ident: &String) -> Result<(TyType, usize), Error> {
+    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {
         for var in self.var_map.iter() {
             if var.0 == *ident {
                 return Ok((var.1.clone(), var.2));

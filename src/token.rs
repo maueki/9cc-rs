@@ -9,7 +9,6 @@ struct TokenizeError(String, usize);
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Token {
     Num(i64),
-    Op(OpType),
     Char(char), // single-letter symbol
     Ident(String),
     Return,
@@ -17,10 +16,6 @@ pub enum Token {
     Else,
     Eof,
     Sizeof,
-}
-
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub enum OpType {
     Eq,
     Ne,
     Le,
@@ -28,13 +23,12 @@ pub enum OpType {
 }
 
 lazy_static! {
-    pub static ref STR_TO_OP: Vec<(&'static str, OpType)> = {
-        use OpType::*;
+    pub static ref STR_TO_OP: Vec<(&'static str, Token)> = {
         let mut v = Vec::new();
-        v.push(("==", Eq));
-        v.push(("!=", Ne));
-        v.push(("<=", Le));
-        v.push((">=", Ge));
+        v.push(("==", Token::Eq));
+        v.push(("!=", Token::Ne));
+        v.push(("<=", Token::Le));
+        v.push((">=", Token::Ge));
         v
     };
     pub static ref RESERVED: Vec<(&'static str, Token)> = {
@@ -90,7 +84,7 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
                     .as_str()
             {
                 if let Some(..) = chars.get(pos + sym.len()) {
-                    tokens.push_back((Token::Op(ty.clone()), pos));
+                    tokens.push_back((ty.clone(), pos));
                     pos += sym.len();
                     continue 'outer;
                 }
@@ -140,7 +134,6 @@ pub fn tokenize(text: &str) -> Result<Tokens, Error> {
 
 #[cfg(test)]
 mod test {
-    use super::OpType::*;
     use super::*;
 
     #[test]
@@ -203,7 +196,7 @@ mod test {
                 (Char(';'), 3),
                 (If, 4),
                 (Ident("a".to_owned()), 7),
-                (Op(Eq), 8),
+                (Eq, 8),
                 (Num(1), 10),
                 (Return, 12),
                 (Num(2), 19),
@@ -221,7 +214,7 @@ mod test {
                 (Char(';'), 3),
                 (If, 4),
                 (Ident("a".to_owned()), 7),
-                (Op(Eq), 8),
+                (Eq, 8),
                 (Num(1), 10),
                 (Return, 12),
                 (Num(2), 19),
@@ -244,7 +237,7 @@ mod test {
                 (If, 4),
                 (Char('('), 6),
                 (Ident("a".to_owned()), 7),
-                (Op(Eq), 8),
+                (Eq, 8),
                 (Num(1), 10),
                 (Char(')'), 11),
                 (Char('{'), 12),
