@@ -86,7 +86,6 @@ trait Consume<T> {
 pub enum TyType {
     Int,
     Ptr(Box<TyType>),
-    Void,
     Array(Box<TyType>, usize),
 }
 
@@ -356,7 +355,7 @@ fn relational<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
 }
 
 fn add<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
-    let (mut lty, mut lnode) = mul(context)?;
+    let (lty, mut lnode) = mul(context)?;
 
     loop {
         match context.front_token() {

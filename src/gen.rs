@@ -14,13 +14,26 @@ fn sizeof(ty: &TyType) -> usize {
         TyType::Int => 4,
         TyType::Ptr(..) => 8,
         TyType::Array(ty, size) => size * sizeof(ty),
-        _ => unreachable!(),
     }
 }
 
 #[derive(Fail, Debug)]
 #[fail(display = "Gen Error: {}", _0)]
 pub struct GenError(String);
+
+fn get_type(node: &Node) -> TyType {
+    match node {
+        Node::Num(ty, ..) => ty.clone(),
+        Node::Bin(ty, ..) => ty.clone(),
+        Node::Assign(ty, ..) => ty.clone(),
+        Node::Ident(ty, ..) => ty.clone(),
+        Node::Call(ty, ..) => ty.clone(),
+        Node::Addr(ty, ..) => ty.clone(),
+        Node::Deref(ty, ..) => ty.clone(),
+        Node::Sizeof(..) => TyType::Int,
+        _ => unimplemented!(),
+    }
+}
 
 pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
     let mut context = Context::new();
@@ -31,21 +44,21 @@ pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
     Ok(())
 }
 
-fn gen_lval(node: &Node, context: &mut Context) -> Result<TyType, Error> {
+fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
         Node::Ident(_, id) => {
-            let (ty, offset) = context.var_get(id)?;
+            let (_, offset) = context.var_get(id)?;
             println!("  mov rax, rbp");
             println!("  sub rax, {}", offset);
             println!("  push rax");
-            Ok(ty)
+            Ok(())
         }
         Node::Deref(_, ptr) => gen(ptr, context),
         _ => Err(GenError("代入の左辺値が変数ではありません".to_owned()).into()),
     }
 }
 
-fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
+fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
     use super::BinOp::*;
 
     match node {
@@ -55,31 +68,31 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             println!("  mov rsp, rbp");
             println!("  pop rbp");
             println!("  ret");
-            Ok(TyType::Void)
+            Ok(())
         }
         Node::Num(_, v) => {
             println!("  mov rax, {}", v);
             println!("  push rax");
-            Ok(TyType::Int)
+            Ok(())
         }
-        Node::Ident(..) => {
-            let ty = gen_lval(node, context)?;
+        Node::Ident(ty, _) => {
+            gen_lval(node, context)?;
             println!("  pop rax");
-            if sizeof(&ty) == 4 {
+            if sizeof(ty) == 4 {
                 println!("  mov eax, [rax]");
                 println!("  movsx rax, eax");
             } else {
                 println!("  mov rax, [rax]");
             }
             println!("  push rax");
-            Ok(ty)
+            Ok(())
         }
         Node::Assign(_, lhs, rhs) => {
-            let ty = gen_lval(&lhs, context)?;
+            gen_lval(&lhs, context)?;
             gen(rhs, context)?;
             println!("  pop rdi");
             println!("  pop rax");
-            if sizeof(&ty) == 4 {
+            if sizeof(&get_type(&lhs)) == 4 {
                 // FIXME: 符号を含めてrdiをediへコピー
                 println!("  mov r10, 0x8000000000000000");
                 println!("  and r10, rdi");
@@ -99,61 +112,53 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
                 println!("  mov [rax], rdi");
             }
             println!("  push rdi");
-            Ok(ty)
+            Ok(())
         }
         Node::Bin(_, op, lhs, rhs) => {
-            let lty = gen(lhs, context)?;
-            let rty = gen(rhs, context)?;
+            gen(lhs, context)?;
+            gen(rhs, context)?;
 
             println!("  pop rdi");
             println!("  pop rax");
 
-            let ty = match op {
+            match op {
                 Add => {
                     println!("  add rax, rdi");
-                    Ok(TyType::Int) // FIXME
                 }
                 Sub => {
                     println!("  sub rax, rdi");
-                    Ok(TyType::Int) // FIXME
                 }
                 Mul => {
                     println!("  mul rdi");
-                    Ok(TyType::Int) // FIXME
                 }
                 Div => {
                     println!("  mov rdx, 0");
                     println!("  div rdi");
-                    Ok(TyType::Int) // FIXME
                 }
                 Eq => {
                     println!("  cmp rax, rdi");
                     println!("  sete al");
                     println!("  movzb rax, al");
-                    Ok(TyType::Int) // FIXME
                 }
                 Ne => {
                     println!("  cmp rax, rdi");
                     println!("  setne al");
                     println!("  movzb rax, al");
-                    Ok(TyType::Int) // FIXME
                 }
                 Le => {
                     println!("  cmp rax, rdi");
                     println!("  setle al");
                     println!("  movzb rax, al");
-                    Ok(TyType::Int) // FIXME
                 }
                 Ge => {
                     println!("  cmp rdi, rax");
                     println!("  setle al");
                     println!("  movzb rax, al");
-                    Ok(TyType::Int) // FIXME
                 }
             };
 
             println!("  push rax");
-            ty
+            Ok(())
         }
         Node::If(cond, node_then, node_else) => {
             gen(cond, context)?;
@@ -174,7 +179,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
                     println!("{}:", else_label);
                 }
             }
-            Ok(TyType::Void)
+            Ok(())
         }
         Node::Block(nodes) => {
             for n in nodes {
@@ -183,7 +188,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             }
 
             println!("  push rax");
-            Ok(TyType::Void)
+            Ok(())
         }
         Node::Call(_, fname, args) => {
             if args.len() > REG_ARGS.len() {
@@ -207,7 +212,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             println!("  call {}", fname);
             println!("  add rsp,r15");
             println!("  push rax");
-            Ok(TyType::Int) // FIXME
+            Ok(())
         }
         Node::DeclFunc(fname, params, stmts) => {
             if params.len() > REG_ARGS.len() {
@@ -254,35 +259,32 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             println!("  pop rbp");
             println!("  ret");
 
-            Ok(TyType::Void)
+            Ok(())
         }
         Node::DeclVar(ident, ty) => {
             context.var_put(ident, &ty);
-            Ok(ty.clone())
+            Ok(())
         }
-        Node::Deref(dty, ptr) => {
-            let ty = gen(ptr, context)?;
+        Node::Deref(ty, ptr) => {
+            gen(ptr, context)?;
             println!("  pop rax");
-            if sizeof(dty) == 4 {
+            if sizeof(ty) == 4 {
                 println!("  mov eax, [rax]");
                 println!("  movsx rax, eax");
             } else {
                 println!("  mov rax, [rax]");
             }
             println!("  push rax");
-            match ty {
-                TyType::Ptr(ty) => Ok(*ty),
-                _ => unreachable!(), // FIXME:
-            }
+            Ok(())
         }
         Node::Addr(_, id) => {
-            let ty = gen_lval(id, context)?;
-            Ok(TyType::Ptr(Box::new(ty)))
+            gen_lval(id, context)?;
+            Ok(())
         }
         Node::Sizeof(ty) => {
             println!("  mov rax, {}", sizeof(&ty));
             println!("  push rax");
-            Ok(TyType::Int)
+            Ok(())
         }
     }
 }
@@ -322,18 +324,16 @@ impl<'a> Context<'a> {
 
         // アライメント調整
         let size = sizeof(ty);
-        if size == 8 {
-            if self.cur_offset % 8 != 0 {
-                assert!(self.cur_offset % 4 == 0);
-                self.cur_offset += 4;
-            }
+        if size == 8 && self.cur_offset % 8 != 0 {
+            assert!(self.cur_offset % 4 == 0);
+            self.cur_offset += 4;
         }
 
         let cur_offset = self.cur_offset;
         self.var_map
             .push_front((ident.to_string(), ty.clone(), cur_offset));
 
-        self.cur_offset += sizeof(ty);
+        self.cur_offset += size;
         cur_offset
     }
 
