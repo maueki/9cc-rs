@@ -109,29 +109,10 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             println!("  pop rax");
 
             let ty = match op {
-                Add => match (lty, rty) {
-                    (TyType::Int, TyType::Int) => {
-                        println!("  add rax, rdi");
-                        Ok(TyType::Int)
-                    }
-                    (TyType::Ptr(lt), TyType::Int) => {
-                        println!("  mov rsi, rax");
-                        println!("  mov rax, {}", sizeof(&lt));
-                        println!("  mul rdi");
-                        println!("  add rax, rsi");
-                        Ok(TyType::Ptr(lt))
-                    }
-                    (TyType::Int, TyType::Ptr(lt)) => {
-                        println!("  mov rsi, rdi");
-                        println!("  mov rdi, {}", sizeof(&lt));
-                        println!("  mul rdi");
-                        println!("  add rax, rsi");
-                        Ok(TyType::Ptr(lt))
-                    }
-                    (l, r) => {
-                        Err(GenError(format!("invalid operands ( {:?} + {:?} )", l, r)).into())
-                    }
-                },
+                Add => {
+                    println!("  add rax, rdi");
+                    Ok(TyType::Int) // FIXME
+                }
                 Sub => {
                     println!("  sub rax, rdi");
                     Ok(TyType::Int) // FIXME

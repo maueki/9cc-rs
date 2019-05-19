@@ -364,32 +364,48 @@ fn add<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
                 let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
-                lty = match (lty, rty) {
-                    (TyType::Int, TyType::Ptr(ty)) => TyType::Ptr(ty),
-                    (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
-                    (TyType::Int, TyType::Int) => TyType::Int,
+                lnode = match (lty.clone(), rty) {
+                    (TyType::Int, TyType::Ptr(ty)) => new_node_bin(
+                        TyType::Ptr(ty.clone()),
+                        BinOp::Add,
+                        new_node_bin(TyType::Int, BinOp::Mul, lnode, Node::Sizeof(*ty)),
+                        rnode,
+                    ),
+                    (TyType::Ptr(ty), TyType::Int) => new_node_bin(
+                        TyType::Ptr(ty.clone()),
+                        BinOp::Add,
+                        lnode,
+                        new_node_bin(TyType::Int, BinOp::Mul, rnode, Node::Sizeof(*ty)),
+                    ),
+                    (TyType::Int, TyType::Int) => {
+                        new_node_bin(lty.clone(), BinOp::Add, lnode, rnode)
+                    }
                     _ => {
                         return Err(ParseError("加算不可能な型です".to_owned(), pos).into())
                     }
                 };
-                lnode = new_node_bin(lty.clone(), BinOp::Add, lnode, rnode);
             }
             Some((Token::Char('-'), pos)) => {
                 let pos = *pos;
                 context.pop_token();
                 let (rty, rnode) = mul(context)?;
-                lty = match (lty, rty) {
+                lnode = match (lty.clone(), rty) {
                     (TyType::Int, TyType::Ptr(_ty)) => {
                         return Err(ParseError("引算不可能な型です".to_owned(), pos).into())
                     }
-                    (TyType::Ptr(ty), TyType::Int) => TyType::Ptr(ty),
-                    (TyType::Int, TyType::Int) => TyType::Int,
+                    (TyType::Ptr(ty), TyType::Int) => new_node_bin(
+                        TyType::Ptr(ty.clone()),
+                        BinOp::Sub,
+                        lnode,
+                        new_node_bin(TyType::Int, BinOp::Mul, rnode, Node::Sizeof(*ty)),
+                    ),
+                    (TyType::Int, TyType::Int) => {
+                        new_node_bin(lty.clone(), BinOp::Sub, lnode, rnode)
+                    }
                     _ => {
                         return Err(ParseError("引算不可能な型です".to_owned(), pos).into())
                     }
                 };
-
-                lnode = new_node_bin(lty.clone(), BinOp::Sub, lnode, rnode);
             }
             _ => break,
         }
