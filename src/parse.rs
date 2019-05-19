@@ -70,10 +70,13 @@ trait Consume<T> {
 /// mul: mul "*" unary
 /// mul: mul "/" unary
 ///
-/// unary: term
-/// unary: "*" term
-/// unary: "&" term
-/// unary: sizeof term
+/// unary: postfix
+/// unary: "*" postfix
+/// unary: "&" postfix
+/// unary: sizeof postfix
+///
+/// postfix: term
+/// postfix: term "[" assign "]"
 ///
 /// term: ident "(" [arguments] ")"
 /// term: num
@@ -110,6 +113,28 @@ pub enum Node {
     Addr(TyType, Box<Node>),
     Deref(TyType, Box<Node>),
     Sizeof(TyType),
+}
+
+pub fn get_type(node: &Node) -> TyType {
+    match node {
+        Node::Num(ty, ..) => ty.clone(),
+        Node::Bin(ty, ..) => ty.clone(),
+        Node::Assign(ty, ..) => ty.clone(),
+        Node::Ident(ty, ..) => ty.clone(),
+        Node::Call(ty, ..) => ty.clone(),
+        Node::Addr(ty, ..) => ty.clone(),
+        Node::Deref(ty, ..) => ty.clone(),
+        Node::Sizeof(..) => TyType::Int,
+        _ => unimplemented!(),
+    }
+}
+
+pub fn deref_type(ty: &TyType) -> TyType {
+    match ty {
+        TyType::Ptr(ty) => *ty.clone(),
+        TyType::Array(ty, ..) => *ty.clone(),
+        _ => unimplemented!(),
+    }
 }
 
 pub fn parse(tokens: &Tokens) -> Result<Vec<Node>, Error> {
@@ -355,34 +380,16 @@ fn relational<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
 }
 
 fn add<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
-    let (lty, mut lnode) = mul(context)?;
+    let (mut lty, mut lnode) = mul(context)?;
 
     loop {
         match context.front_token() {
-            Some((Token::Char('+'), pos)) => {
-                let pos = *pos;
+            Some((Token::Char('+'), _pos)) => {
                 context.pop_token();
-                let (rty, rnode) = mul(context)?;
-                lnode = match (lty.clone(), rty) {
-                    (TyType::Int, TyType::Ptr(ty)) => new_node_bin(
-                        TyType::Ptr(ty.clone()),
-                        BinOp::Add,
-                        new_node_bin(TyType::Int, BinOp::Mul, lnode, Node::Sizeof(*ty)),
-                        rnode,
-                    ),
-                    (TyType::Ptr(ty), TyType::Int) => new_node_bin(
-                        TyType::Ptr(ty.clone()),
-                        BinOp::Add,
-                        lnode,
-                        new_node_bin(TyType::Int, BinOp::Mul, rnode, Node::Sizeof(*ty)),
-                    ),
-                    (TyType::Int, TyType::Int) => {
-                        new_node_bin(lty.clone(), BinOp::Add, lnode, rnode)
-                    }
-                    _ => {
-                        return Err(ParseError("加算不可能な型です".to_owned(), pos).into())
-                    }
-                };
+                let (_, rnode) = mul(context)?;
+                let ret = add_node(lnode, rnode)?;
+                lnode = ret.1;
+                lty = ret.0;
             }
             Some((Token::Char('-'), pos)) => {
                 let pos = *pos;
@@ -411,6 +418,42 @@ fn add<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     }
 
     Ok((lty, lnode))
+}
+
+fn add_node(lnode: Node, rnode: Node) -> Result<(TyType, Node), Error> {
+    let lty = get_type(&lnode);
+    let rty = get_type(&rnode);
+
+    let node = match (lty.clone(), rty) {
+        (TyType::Int, TyType::Ptr(ty)) => new_node_bin(
+            TyType::Ptr(ty.clone()),
+            BinOp::Add,
+            new_node_bin(TyType::Int, BinOp::Mul, lnode, Node::Sizeof(*ty)),
+            rnode,
+        ),
+        (TyType::Ptr(ty), TyType::Int) => new_node_bin(
+            TyType::Ptr(ty.clone()),
+            BinOp::Add,
+            lnode,
+            new_node_bin(TyType::Int, BinOp::Mul, rnode, Node::Sizeof(*ty)),
+        ),
+        (TyType::Int, TyType::Array(ty, _)) => new_node_bin(
+            TyType::Ptr(ty.clone()),
+            BinOp::Add,
+            new_node_bin(TyType::Int, BinOp::Mul, lnode, Node::Sizeof(*ty)),
+            rnode,
+        ),
+        (TyType::Array(ty, _), TyType::Int) => new_node_bin(
+            TyType::Ptr(ty.clone()),
+            BinOp::Add,
+            lnode,
+            new_node_bin(TyType::Int, BinOp::Mul, rnode, Node::Sizeof(*ty)),
+        ),
+        (TyType::Int, TyType::Int) => new_node_bin(lty.clone(), BinOp::Add, lnode, rnode),
+        _ => return Err(ParseError("加算不可能な型です".to_owned(), 0).into()),
+    };
+
+    Ok((get_type(&node), node))
 }
 
 fn mul<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
@@ -445,7 +488,7 @@ fn mul<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
 
 fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
     if let Ok(..) = context.consume('*') {
-        let (ty, node) = term(context)?;
+        let (ty, node) = postfix(context)?;
         match ty {
             TyType::Ptr(ty) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
             t => {
@@ -457,7 +500,7 @@ fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
             }
         }
     } else if let Ok(..) = context.consume('&') {
-        let (ty, node) = term(context)?;
+        let (ty, node) = postfix(context)?;
         Ok((
             TyType::Ptr(Box::new(ty.clone())),
             Node::Addr(TyType::Ptr(Box::new(ty.clone())), Box::new(node)),
@@ -467,8 +510,21 @@ fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
         let (ty, _) = unary(context)?;
         Ok((TyType::Int, Node::Sizeof(ty)))
     } else {
-        term(context)
+        postfix(context)
     }
+}
+
+fn postfix<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
+    let (ty, mut node) = term(context)?;
+
+    if context.consume('[').is_ok() {
+        let (_, rnode) = assign(context)?;
+        context.consume(']')?;
+        let (ty, ret_node) = add_node(node, rnode)?;
+        node = Node::Deref(deref_type(&ty), Box::new(ret_node))
+    }
+
+    Ok((ty, node))
 }
 
 fn term<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
@@ -915,6 +971,31 @@ mod test {
                     "a".to_owned(),
                     TyType::Array(Box::new(TyType::Int), 10)
                 )]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a[10]; a[5];").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![
+                    DeclVar("a".to_owned(), TyType::Array(Box::new(TyType::Int), 10)),
+                    Deref(
+                        TyType::Int,
+                        Box::new(new_node_bin(
+                            TyType::Ptr(Box::new(TyType::Int)),
+                            Add,
+                            new_node_ident(TyType::Array(Box::new(TyType::Int), 10), "a"),
+                            new_node_bin(
+                                TyType::Int,
+                                Mul,
+                                new_node_num(TyType::Int, 5),
+                                Sizeof(TyType::Int)
+                            ),
+                        ))
+                    ),
+                ]
             );
         }
     }

@@ -21,20 +21,6 @@ fn sizeof(ty: &TyType) -> usize {
 #[fail(display = "Gen Error: {}", _0)]
 pub struct GenError(String);
 
-fn get_type(node: &Node) -> TyType {
-    match node {
-        Node::Num(ty, ..) => ty.clone(),
-        Node::Bin(ty, ..) => ty.clone(),
-        Node::Assign(ty, ..) => ty.clone(),
-        Node::Ident(ty, ..) => ty.clone(),
-        Node::Call(ty, ..) => ty.clone(),
-        Node::Addr(ty, ..) => ty.clone(),
-        Node::Deref(ty, ..) => ty.clone(),
-        Node::Sizeof(..) => TyType::Int,
-        _ => unimplemented!(),
-    }
-}
-
 pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
     let mut context = Context::new();
     for n in nodes {
