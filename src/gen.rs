@@ -13,6 +13,7 @@ fn sizeof(ty: &TyType) -> usize {
     match ty {
         TyType::Int => 4,
         TyType::Ptr(..) => 8,
+        TyType::Array(ty, size) => size * sizeof(ty),
         _ => unreachable!(),
     }
 }
@@ -57,13 +58,19 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             Ok(TyType::Void)
         }
         Node::Num(_, v) => {
-            println!("  push {}", v);
+            println!("  mov rax, {}", v);
+            println!("  push rax");
             Ok(TyType::Int)
         }
         Node::Ident(..) => {
             let ty = gen_lval(node, context)?;
             println!("  pop rax");
-            println!("  mov rax, [rax]");
+            if sizeof(&ty) == 4 {
+                println!("  mov eax, [rax]");
+                println!("  movsx rax, eax");
+            } else {
+                println!("  mov rax, [rax]");
+            }
             println!("  push rax");
             Ok(ty)
         }
@@ -72,7 +79,25 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             gen(rhs, context)?;
             println!("  pop rdi");
             println!("  pop rax");
-            println!("  mov [rax], rdi");
+            if sizeof(&ty) == 4 {
+                // FIXME: 符号を含めてrdiをediへコピー
+                println!("  mov r10, 0x8000000000000000");
+                println!("  and r10, rdi");
+                println!("  cmp r10, 0");
+                let label = context.new_label();
+                println!("  je {}", label);
+                println!("  xor rdi, 0xffffffffffffffff");
+                println!("  sub rdi, 1");
+                println!("  xor edi, 0xffffffff");
+                println!("  sub edi, 1");
+
+                println!("{}:", label);
+                println!("  mov [rax], edi");
+
+                println!("  movsx rdi, edi");
+            } else {
+                println!("  mov [rax], rdi");
+            }
             println!("  push rdi");
             Ok(ty)
         }
@@ -218,7 +243,24 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
                 let offset = context.var_put(&p.name, &p.ty);
                 println!("  mov rax, rbp");
                 println!("  sub rax, {}", offset);
-                println!("  mov [rax], {}", REG_ARGS[i]);
+                if sizeof(&p.ty) == 4 {
+                    println!("  mov rdi, {}", REG_ARGS[i]);
+                    // FIXME: 符号を含めてrdiをediへコピー
+                    println!("  mov r10, 0x8000000000000000");
+                    println!("  and r10, rdi");
+                    println!("  cmp r10, 0");
+                    let label = context.new_label();
+                    println!("  je {}", label);
+                    println!("  xor rdi, 0xffffffffffffffff");
+                    println!("  sub rdi, 1");
+                    println!("  xor edi, 0xffffffff");
+                    println!("  sub edi, 1");
+
+                    println!("{}:", label);
+                    println!("  mov [rax], edi");
+                } else {
+                    println!("  mov [rax], {}", REG_ARGS[i]);
+                }
             }
 
             for node in stmts {
@@ -237,10 +279,15 @@ fn gen(node: &Node, context: &mut Context) -> Result<TyType, Error> {
             context.var_put(ident, &ty);
             Ok(ty.clone())
         }
-        Node::Deref(_, ptr) => {
+        Node::Deref(dty, ptr) => {
             let ty = gen(ptr, context)?;
             println!("  pop rax");
-            println!("  mov rax, [rax]");
+            if sizeof(dty) == 4 {
+                println!("  mov eax, [rax]");
+                println!("  movsx rax, eax");
+            } else {
+                println!("  mov rax, [rax]");
+            }
             println!("  push rax");
             match ty {
                 TyType::Ptr(ty) => Ok(*ty),
@@ -270,7 +317,7 @@ impl<'a> Context<'a> {
     fn new() -> Self {
         Context {
             var_map: VecDeque::new(),
-            cur_offset: 0,
+            cur_offset: 8, // offset for rbp
             label_index: 0,
             parent: None,
         }
@@ -279,7 +326,7 @@ impl<'a> Context<'a> {
     fn with_parent(parent: &'a Context<'a>) -> Self {
         Context {
             var_map: VecDeque::new(),
-            cur_offset: 0,
+            cur_offset: 8, // offset for rbp
             label_index: 0,
             parent: Some(parent),
         }
@@ -292,10 +339,21 @@ impl<'a> Context<'a> {
             }
         }
 
-        self.cur_offset += 8;
+        // アライメント調整
+        let size = sizeof(ty);
+        if size == 8 {
+            if self.cur_offset % 8 != 0 {
+                assert!(self.cur_offset % 4 == 0);
+                self.cur_offset += 4;
+            }
+        }
+
+        let cur_offset = self.cur_offset;
         self.var_map
-            .push_front((ident.to_string(), ty.clone(), self.cur_offset));
-        self.cur_offset
+            .push_front((ident.to_string(), ty.clone(), cur_offset));
+
+        self.cur_offset += sizeof(ty);
+        cur_offset
     }
 
     fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {

@@ -31,6 +31,7 @@ try 3  "int main() { int a; int b; a=1;b=1;if (a==b) { int c; c = 1; return a+b+
 try 0  "int main() {foo(); return 0;}"
 try 1  "int main() {return sub(3,2);}"
 try 2  "int div(int a, int b) { return a/b; } int main() { return div(6,3); }"
+try 3  "int main() {int x; x=3; int *y; y=&x; return x;}"
 try 3  "int main() {int x; x=3; int *y; y=&x; return *y;}"
 try 4  "int main() {int x; x=3; int *y; y=&x; *y=4; return x;}"
 try 8  "int main() {int *p; alloc4(&p, 1, 2, 4, 8); int *q; q = p + 3; return *q;}"
