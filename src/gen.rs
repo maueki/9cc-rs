@@ -308,8 +308,13 @@ impl<'a> Context<'a> {
             }
         }
 
+        // 以下変数未登録時
+
         // アライメント調整
-        let size = sizeof(ty);
+        let size = match ty {
+            TyType::Array(elmt, ..) => sizeof(elmt),
+            ty => sizeof(ty),
+        };
         if size == 8 && self.cur_offset % 8 != 0 {
             assert!(self.cur_offset % 4 == 0);
             self.cur_offset += 4;
@@ -319,7 +324,7 @@ impl<'a> Context<'a> {
         self.var_map
             .push_front((ident.to_string(), ty.clone(), cur_offset));
 
-        self.cur_offset += size;
+        self.cur_offset += sizeof(ty);
         cur_offset
     }
 

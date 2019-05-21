@@ -491,6 +491,7 @@ fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
         let (ty, node) = postfix(context)?;
         match ty {
             TyType::Ptr(ty) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
+            TyType::Array(ty, ..) => Ok((*ty.clone(), Node::Deref(*ty.clone(), Box::new(node)))),
             t => {
                 Err(ParseError(
                     format!("デリファレンスできない型です: {:?}", t),
@@ -995,6 +996,25 @@ mod test {
                             ),
                         ))
                     ),
+                ]
+            );
+        }
+
+        {
+            let tokens = tokenize("int a[2]; *a = 1;").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![
+                    DeclVar("a".to_owned(), TyType::Array(Box::new(TyType::Int), 2)),
+                    new_node_assign(
+                        TyType::Int,
+                        Deref(
+                            TyType::Int,
+                            Box::new(new_node_ident(TyType::Array(Box::new(TyType::Int), 2), "a"))
+                        ),
+                        new_node_num(TyType::Int, 1)
+                    )
                 ]
             );
         }
