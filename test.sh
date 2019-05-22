@@ -4,7 +4,7 @@ try() {
   input="$2"
 
   ./target/debug/9cc "$input" > /tmp/tmp.s
-  gcc -o /tmp/tmp /tmp/tmp.s test.c
+  gcc -g -o /tmp/tmp /tmp/tmp.s test.c
   /tmp/tmp
   actual="$?"
 
@@ -38,4 +38,7 @@ try 8  "int main() {int *p; alloc4(&p, 1, 2, 4, 8); int *q; q = p + 3; return *q
 #TODO: to improve gen.rs# try 1  "int main() { int a; a=1; { int a; a=2;} return a;}"
 try 12 "int main() { int a; int* b; return sizeof a + sizeof b;}"
 try 3 "int main() { int a[2]; *a = 1; *(a + 1) = 2; int *p; p = a; return *p + *(p+1);}"
+try 3 "int main() { int a[2]; a[0] = 1; a[1] = 2; int *p; p = a; return *p + *(p+1);}"
+try 3 "int main() { int a[2]; a[0] = 1; a[1] = 2; int *p; p = a; return p[0] + p[1];}"
+
 echo OK

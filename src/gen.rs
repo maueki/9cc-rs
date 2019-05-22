@@ -63,14 +63,20 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
         }
         Node::Ident(ty, _) => {
             gen_lval(node, context)?;
-            println!("  pop rax");
-            if sizeof(ty) == 4 {
-                println!("  mov eax, [rax]");
-                println!("  movsx rax, eax");
-            } else {
-                println!("  mov rax, [rax]");
+            match ty {
+                TyType::Array(..) => {}
+                _ => {
+                    println!("  pop rax");
+                    if sizeof(ty) == 4 {
+                        println!("  mov eax, [rax]");
+                        println!("  movsx rax, eax");
+                    } else {
+                        println!("  mov rax, [rax]");
+                    }
+                    println!("  push rax");
+                }
             }
-            println!("  push rax");
+
             Ok(())
         }
         Node::Assign(_, lhs, rhs) => {
@@ -162,6 +168,8 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
                     println!("{}:", end_label);
                 }
                 None => {
+                    println!("  mov rax, 0xdeadbeef"); // dummy
+                    println!("  push rax"); // dummy
                     println!("{}:", else_label);
                 }
             }
@@ -249,6 +257,8 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
         }
         Node::DeclVar(ident, ty) => {
             context.var_put(ident, &ty);
+            println!("  mov rax, 0xdeadbeef"); // dummy
+            println!("  push rax"); // dummy
             Ok(())
         }
         Node::Deref(ty, ptr) => {
