@@ -73,6 +73,8 @@ trait Consume<T> {
 /// unary: postfix
 /// unary: "*" postfix
 /// unary: "&" postfix
+/// unary: "+" postfix
+/// unary: "-" postfix
 /// unary: sizeof postfix
 ///
 /// postfix: term
@@ -505,6 +507,14 @@ fn unary<T: Context>(context: &mut T) -> Result<(TyType, Node), Error> {
         Ok((
             TyType::Ptr(Box::new(ty.clone())),
             Node::Addr(TyType::Ptr(Box::new(ty.clone())), Box::new(node)),
+        ))
+    } else if let Ok(..) = context.consume('+') {
+        postfix(context)
+    } else if let Ok(..) = context.consume('-') {
+        let (ty, node) = postfix(context)?;
+        Ok((
+            ty.clone(),
+            new_node_bin(ty, BinOp::Sub, new_node_num(TyType::Int, 0), node),
         ))
     } else if let Some((Token::Sizeof, _)) = context.front_token() {
         context.pop_token();
@@ -1016,6 +1026,20 @@ mod test {
                         new_node_num(TyType::Int, 1)
                     )
                 ]
+            );
+        }
+
+        {
+            let tokens = tokenize("return -3;").unwrap();
+            let p = stmts(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![new_node_return(new_node_bin(
+                    TyType::Int,
+                    BinOp::Sub,
+                    new_node_num(TyType::Int, 0),
+                    new_node_num(TyType::Int, 3)
+                ))]
             );
         }
     }

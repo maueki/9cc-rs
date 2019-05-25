@@ -3,6 +3,11 @@ try() {
   expected="$1"
   input="$2"
 
+  # 負の返り値は255以下の正値になるため
+  if [ $expected -lt 0 ]; then
+    expected=$((255 + $expected + 1))
+  fi
+
   ./target/debug/9cc "$input" > /tmp/tmp.s
   gcc -g -o /tmp/tmp /tmp/tmp.s test.c
   /tmp/tmp
@@ -30,6 +35,8 @@ try 0  "int main() { int a; int b; a=1;b=1;if (a!=b) return a+b; else return 0;}
 try 3  "int main() { int a; int b; a=1;b=1;if (a==b) { int c; c = 1; return a+b+c;} else return 0;}"
 try 0  "int main() {foo(); return 0;}"
 try 1  "int main() {return sub(3,2);}"
+try -3 "int main() { return -3;}"
+try -2 "int main() {return sub(-3,-1);}"
 try 2  "int div(int a, int b) { return a/b; } int main() { return div(6,3); }"
 try 3  "int main() {int x; x=3; int *y; y=&x; return x;}"
 try 3  "int main() {int x; x=3; int *y; y=&x; return *y;}"
