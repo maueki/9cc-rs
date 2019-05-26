@@ -47,5 +47,7 @@ try 12 "int main() { int a; int* b; return sizeof a + sizeof b;}"
 try 3 "int main() { int a[2]; *a = 1; *(a + 1) = 2; int *p; p = a; return *p + *(p+1);}"
 try 3 "int main() { int a[2]; a[0] = 1; a[1] = 2; int *p; p = a; return *p + *(p+1);}"
 try 3 "int main() { int a[2]; a[0] = 1; a[1] = 2; int *p; p = a; return p[0] + p[1];}"
+try 3 "int a; int main() { a = 3; return a; }"
+try 3 "int a; int *b; int main() { a = 3; b = &a; return *b; }"
 
 echo OK

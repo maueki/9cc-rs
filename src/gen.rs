@@ -75,13 +75,7 @@ pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
 
 fn gen_lval(node: &Node, context: &mut Context) -> Result<(), Error> {
     match node {
-        Node::Ident(_, id) => {
-            let (_, offset) = context.var_get(id)?;
-            println!("  mov rax, rbp");
-            println!("  sub rax, {}", offset);
-            println!("  push rax");
-            Ok(())
-        }
+        Node::Ident(_, id) => context.gen_lval_ident(id),
         Node::Deref(_, ptr) => gen(ptr, context),
         _ => Err(GenError("代入の左辺値が変数ではありません".to_owned()).into()),
     }
@@ -240,33 +234,10 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
 
             let mut context = FuncContext::new(context);
             println!("{}:", fname);
-            println!("  push rbp");
-            println!("  mov rbp, rsp");
-            println!("  sub rsp, 208"); // FIXME:
-
-            for (i, p) in params.iter().enumerate() {
-                let offset = context.var_put(&p.name, &p.ty);
-                println!("  mov rax, rbp");
-                println!("  sub rax, {}", offset);
-                println!("  mov [rax], {}", argreg(i, &p.ty));
-            }
-
-            for node in stmts {
-                gen(&node, &mut context)?;
-                println!("  pop rax");
-            }
-
-            // TODO: Node::Returnで追加されているはずだが…
-            println!("  mov rsp, rbp");
-            println!("  pop rbp");
-            println!("  ret");
-
-            Ok(())
+            context.gen_func(params, stmts)
         }
         Node::DeclVar(ident, ty) => {
             context.var_put(ident, &ty);
-            println!("  mov rax, 0xdeadbeef"); // dummy
-            println!("  push rax"); // dummy
             Ok(())
         }
         Node::Deref(ty, ptr) => {
@@ -289,14 +260,13 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
 }
 
 trait Context {
-    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize;
-    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error>;
+    fn var_put(&mut self, ident: &str, ty: &TyType);
     fn new_label(&mut self) -> String;
+    fn gen_lval_ident(&mut self, id: &str) -> Result<(), Error>;
 }
 
 struct GlobalContext {
-    var_map: VecDeque<(String, TyType, usize)>,
-    cur_offset: usize,
+    var_map: VecDeque<(String, TyType)>,
     label_index: usize,
 }
 
@@ -304,65 +274,43 @@ impl GlobalContext {
     fn new() -> Self {
         GlobalContext {
             var_map: VecDeque::new(),
-            cur_offset: 8, // offset for rbp
             label_index: 0,
         }
     }
-
-    /*
-        fn with_parent(parent: &'a Context<'a>) -> Self {
-            GlobalContext {
-                var_map: VecDeque::new(),
-                cur_offset: 8, // offset for rbp
-                label_index: 0,
-                parent: Some(parent),
-            }
-        }
-    */
 }
 
 impl Context for GlobalContext {
-    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize {
+    fn var_put(&mut self, ident: &str, ty: &TyType) {
         for var in self.var_map.iter() {
             if var.0 == *ident {
-                return var.2;
+                panic!("[Error] {} is already defined", var.0);
             }
         }
 
         // 以下変数未登録時
-
-        // アライメント調整
-        let size = match ty {
-            TyType::Array(elmt, ..) => sizeof(elmt),
-            ty => sizeof(ty),
-        };
-        if size == 8 && self.cur_offset % 8 != 0 {
-            assert!(self.cur_offset % 4 == 0);
-            self.cur_offset += 4;
-        }
-
-        let cur_offset = self.cur_offset;
-        self.var_map
-            .push_front((ident.to_string(), ty.clone(), cur_offset));
-
-        self.cur_offset += sizeof(ty);
-        cur_offset
-    }
-
-    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {
-        for var in self.var_map.iter() {
-            if var.0 == *ident {
-                return Ok((var.1.clone(), var.2));
-            }
-        }
-
-        Err(GenError(format!("Undefine variable: {}", ident)).into())
+        self.var_map.push_front((ident.to_string(), ty.clone()));
+        println!(".bss");
+        println!("{}:", ident);
+        println!("  .zero {}", sizeof(&ty.clone()));
+        println!(".text");
     }
 
     fn new_label(&mut self) -> String {
         let label = format!(".Label{}", self.label_index);
         self.label_index += 1;
         label
+    }
+
+    fn gen_lval_ident(&mut self, id: &str) -> Result<(), Error> {
+        self.var_map
+            .iter()
+            .find(|(ident, _)| id == ident)
+            .map(|(id, _)| {
+                println!("  lea {}, {}[rip]", reg64(0), id);
+                println!("  push {}", reg64(0));
+                ()
+            })
+            .ok_or(GenError(format!("Undefined variable: {}", id)).into())
     }
 }
 
@@ -380,13 +328,49 @@ impl<'a> FuncContext<'a> {
             parent,
         }
     }
+
+    fn gen_func(&mut self, params: &Vec<Param>, stmts: &Vec<Node>) -> Result<(), Error> {
+        println!("  push rbp");
+        println!("  mov rbp, rsp");
+        println!("  sub rsp, 208"); // FIXME:
+
+        for (i, p) in params.iter().enumerate() {
+            self.var_put(&p.name, &p.ty);
+            let (_, offset) = self.var_get(&p.name).unwrap();
+            println!("  mov rax, rbp");
+            println!("  sub rax, {}", offset);
+            println!("  mov [rax], {}", argreg(i, &p.ty));
+        }
+
+        for node in stmts {
+            gen(&node, self)?;
+            println!("  pop rax");
+        }
+
+        // TODO: Node::Returnで追加されているはずだが…
+        println!("  mov rsp, rbp");
+        println!("  pop rbp");
+        println!("  ret");
+
+        Ok(())
+    }
+
+    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {
+        for var in self.var_map.iter() {
+            if var.0 == *ident {
+                return Ok((var.1.clone(), var.2));
+            }
+        }
+
+        Err(GenError(format!("Undefine variable: {}", ident)).into())
+    }
 }
 
 impl<'a> Context for FuncContext<'a> {
-    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize {
+    fn var_put(&mut self, ident: &str, ty: &TyType) {
         for var in self.var_map.iter() {
             if var.0 == *ident {
-                return var.2;
+                panic!("[Error] {} is already defined", var.0);
             }
         }
 
@@ -407,17 +391,20 @@ impl<'a> Context for FuncContext<'a> {
             .push_front((ident.to_string(), ty.clone(), cur_offset));
 
         self.cur_offset += sizeof(ty);
-        cur_offset
+
+        println!("  mov rax, 0xdeadbeef"); // dummy
+        println!("  push rax"); // dummy
     }
 
-    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {
-        for var in self.var_map.iter() {
-            if var.0 == *ident {
-                return Ok((var.1.clone(), var.2));
-            }
+    fn gen_lval_ident(&mut self, id: &str) -> Result<(), Error> {
+        if let Ok((_, offset)) = self.var_get(id) {
+            println!("  mov rax, rbp");
+            println!("  sub rax, {}", offset);
+            println!("  push rax");
+            return Ok(());
         }
 
-        Err(GenError(format!("Undefine variable: {}", ident)).into())
+        self.parent.gen_lval_ident(id)
     }
 
     fn new_label(&mut self) -> String {
