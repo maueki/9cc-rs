@@ -233,7 +233,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
             println!("  push rax");
             Ok(())
         }
-        Node::DeclFunc(fname, params, stmts) => {
+        Node::DeclFunc(_ty, fname, params, stmts) => {
             if params.len() > REG_ARGS.len() {
                 return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
             }

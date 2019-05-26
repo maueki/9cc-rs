@@ -110,7 +110,7 @@ pub enum Node {
     If(Box<Node>, Box<Node>, Option<Box<Node>>),
     Block(Vec<Node>),
     Call(TyType, String, Vec<Node>),
-    DeclFunc(String, Vec<Param>, Vec<Node>),
+    DeclFunc(TyType, String, Vec<Param>, Vec<Node>),
     DeclVar(String, TyType),
     Addr(TyType, Box<Node>),
     Deref(TyType, Box<Node>),
@@ -126,6 +126,7 @@ pub fn get_type(node: &Node) -> TyType {
         Node::Call(ty, ..) => ty.clone(),
         Node::Addr(ty, ..) => ty.clone(),
         Node::Deref(ty, ..) => ty.clone(),
+        Node::DeclFunc(ty, ..) => ty.clone(),
         Node::Sizeof(..) => TyType::Int,
         _ => unimplemented!(),
     }
@@ -184,7 +185,7 @@ fn program<T: Context>(context: &mut T) -> Result<Vec<Node>, Error> {
 fn decl_func<T: Context>(context: &mut T) -> Result<Node, Error> {
     let context = &mut BlockContext::new(context);
 
-    ty(context)?; // TODO
+    let t = ty(context)?; // TODO
 
     let fname = {
         let fname = match context.pop_token() {
@@ -208,7 +209,7 @@ fn decl_func<T: Context>(context: &mut T) -> Result<Node, Error> {
     }
     context.consume('}')?;
 
-    Ok(Node::DeclFunc(fname.clone(), ps, nodes))
+    Ok(Node::DeclFunc(t, fname.clone(), ps, nodes))
 }
 
 fn params<T: Context>(context: &mut T) -> Result<Vec<Param>, Error> {
@@ -1053,6 +1054,7 @@ mod test {
             assert_eq!(
                 p.unwrap(),
                 vec![DeclFunc(
+                    TyType::Int,
                     "main".to_owned(),
                     Vec::new(),
                     vec![new_node_return(Num(TyType::Int, 0))]
@@ -1066,6 +1068,7 @@ mod test {
             assert_eq!(
                 p,
                 vec![DeclFunc(
+                    TyType::Int,
                     "hoge".to_owned(),
                     Vec::new(),
                     vec![
