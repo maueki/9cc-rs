@@ -26,6 +26,7 @@ trait Consume<T> {
 /// parser syntax
 ///
 /// program: decl_func program
+/// program: decl_var program
 /// program: ε
 ///
 /// decl_func: type ident "(" params ")" "{" stmt "}"
@@ -126,7 +127,6 @@ pub fn get_type(node: &Node) -> TyType {
         Node::Call(ty, ..) => ty.clone(),
         Node::Addr(ty, ..) => ty.clone(),
         Node::Deref(ty, ..) => ty.clone(),
-        Node::DeclFunc(ty, ..) => ty.clone(),
         Node::Sizeof(..) => TyType::Int,
         _ => unimplemented!(),
     }
@@ -169,6 +169,19 @@ fn new_node_ident(ty: TyType, s: &str) -> Node {
     Node::Ident(ty, s.to_string())
 }
 
+fn rollback_with_error<T, F>(context: &mut T, f: F) -> Result<Node, Error>
+where
+    T: Context,
+    F: FnOnce(&mut T) -> Result<Node, Error>,
+{
+    let pos = context.get_pos();
+
+    f(context).map_err(|e| {
+        context.set_pos(pos);
+        e
+    })
+}
+
 fn program<T: Context>(context: &mut T) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
 
@@ -176,7 +189,13 @@ fn program<T: Context>(context: &mut T) -> Result<Vec<Node>, Error> {
         if let Some((Token::Eof, _)) = context.front_token() {
             break;
         }
-        nodes.push(decl_func(context)?);
+
+        if let Ok(node) = rollback_with_error(context, decl_var) {
+            nodes.push(node);
+        } else {
+            let node = decl_func(context)?;
+            nodes.push(node);
+        }
     }
 
     Ok(nodes)
@@ -1076,6 +1095,25 @@ mod test {
                         Return(Box::new(Num(TyType::Int, 0))),
                     ]
                 ),]
+            );
+        }
+
+        {
+            let tokens = tokenize("int *foo; int foo[10]; int *foo() {} int foo() {}").unwrap();
+            let p = parse(&tokens).unwrap();
+            assert_eq!(
+                p,
+                vec![
+                    DeclVar("foo".to_owned(), TyType::Ptr(Box::new(TyType::Int))),
+                    DeclVar("foo".to_owned(), TyType::Array(Box::new(TyType::Int), 10)),
+                    DeclFunc(
+                        TyType::Ptr(Box::new(TyType::Int)),
+                        "foo".to_owned(),
+                        Vec::new(),
+                        Vec::new()
+                    ),
+                    DeclFunc(TyType::Int, "foo".to_owned(), Vec::new(), Vec::new()),
+                ]
             );
         }
     }
