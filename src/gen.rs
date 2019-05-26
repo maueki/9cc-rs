@@ -65,7 +65,7 @@ fn retreg64() -> &'static str {
 pub struct GenError(String);
 
 pub fn gen_code(nodes: Vec<Node>) -> Result<(), Error> {
-    let mut context = Context::new();
+    let mut context = GlobalContext::new();
     for n in nodes {
         gen(&n, &mut context)?;
     }
@@ -238,7 +238,7 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
                 return Err(GenError(format!("{}: 引数が多すぎます", fname)).into());
             }
 
-            let mut context = Context::with_parent(context);
+            let mut context = FuncContext::new(context);
             println!("{}:", fname);
             println!("  push rbp");
             println!("  mov rbp, rsp");
@@ -288,32 +288,40 @@ fn gen(node: &Node, context: &mut Context) -> Result<(), Error> {
     }
 }
 
-struct Context<'a> {
+trait Context {
+    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize;
+    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error>;
+    fn new_label(&mut self) -> String;
+}
+
+struct GlobalContext {
     var_map: VecDeque<(String, TyType, usize)>,
     cur_offset: usize,
     label_index: usize,
-    parent: Option<&'a Context<'a>>,
 }
 
-impl<'a> Context<'a> {
+impl GlobalContext {
     fn new() -> Self {
-        Context {
+        GlobalContext {
             var_map: VecDeque::new(),
             cur_offset: 8, // offset for rbp
             label_index: 0,
-            parent: None,
         }
     }
 
-    fn with_parent(parent: &'a Context<'a>) -> Self {
-        Context {
-            var_map: VecDeque::new(),
-            cur_offset: 8, // offset for rbp
-            label_index: 0,
-            parent: Some(parent),
+    /*
+        fn with_parent(parent: &'a Context<'a>) -> Self {
+            GlobalContext {
+                var_map: VecDeque::new(),
+                cur_offset: 8, // offset for rbp
+                label_index: 0,
+                parent: Some(parent),
+            }
         }
-    }
+    */
+}
 
+impl Context for GlobalContext {
     fn var_put(&mut self, ident: &str, ty: &TyType) -> usize {
         for var in self.var_map.iter() {
             if var.0 == *ident {
@@ -355,5 +363,64 @@ impl<'a> Context<'a> {
         let label = format!(".Label{}", self.label_index);
         self.label_index += 1;
         label
+    }
+}
+
+struct FuncContext<'a> {
+    var_map: VecDeque<(String, TyType, usize)>,
+    cur_offset: usize,
+    parent: &'a mut Context,
+}
+
+impl<'a> FuncContext<'a> {
+    fn new(parent: &'a mut Context) -> Self {
+        FuncContext {
+            var_map: VecDeque::new(),
+            cur_offset: 8, // offset for rbp
+            parent,
+        }
+    }
+}
+
+impl<'a> Context for FuncContext<'a> {
+    fn var_put(&mut self, ident: &str, ty: &TyType) -> usize {
+        for var in self.var_map.iter() {
+            if var.0 == *ident {
+                return var.2;
+            }
+        }
+
+        // 以下変数未登録時
+
+        // アライメント調整
+        let size = match ty {
+            TyType::Array(elmt, ..) => sizeof(elmt),
+            ty => sizeof(ty),
+        };
+        if size == 8 && self.cur_offset % 8 != 0 {
+            assert!(self.cur_offset % 4 == 0);
+            self.cur_offset += 4;
+        }
+
+        let cur_offset = self.cur_offset;
+        self.var_map
+            .push_front((ident.to_string(), ty.clone(), cur_offset));
+
+        self.cur_offset += sizeof(ty);
+        cur_offset
+    }
+
+    fn var_get(&mut self, ident: &str) -> Result<(TyType, usize), Error> {
+        for var in self.var_map.iter() {
+            if var.0 == *ident {
+                return Ok((var.1.clone(), var.2));
+            }
+        }
+
+        Err(GenError(format!("Undefine variable: {}", ident)).into())
+    }
+
+    fn new_label(&mut self) -> String {
+        self.parent.new_label()
     }
 }
